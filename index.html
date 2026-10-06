@@ -175,6 +175,27 @@ label.fl{display:block;font-size:11px;font-weight:700;letter-spacing:.1em;color:
 .track.meta .fill{height:100%;border-radius:999px;background:var(--roxo)}
 .track.meta .fill.pos{background:var(--viz-verde)}
 /* cartão de contas vencendo */
+.card.metacorr{border-color:rgba(139,124,248,.55);background:linear-gradient(160deg,rgba(139,124,248,.14),var(--surface) 60%)}
+.saude{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:8px 14px;margin-top:10px}
+.saude>div{display:grid;grid-template-columns:1fr auto;gap:0 8px;font-size:12.5px}
+.saude .sn{color:var(--ink-2);font-weight:600}.saude .st{grid-column:1/-1;color:var(--ink-3);font-size:11.5px}
+.iconb.comfoto{color:var(--pos)}
+.cal{margin-top:4px}
+.calh,.calg{display:grid;grid-template-columns:repeat(7,1fr);gap:4px}
+.calh span{text-align:center;font-size:10.5px;font-weight:700;color:var(--ink-3);letter-spacing:.1em;padding:2px 0}
+.cd{min-height:58px;border-radius:9px;background:var(--surface-2);border:1px solid transparent;display:flex;flex-direction:column;align-items:flex-start;
+  padding:4px 5px;gap:1px;font-size:11px;color:var(--ink-2);overflow:hidden;text-align:left}
+.cd b{font-size:12px;color:var(--ink)}
+.cd.vazio{background:none}
+.cd .pin,.cd .pout{font-style:normal;font-family:var(--f-num);font-size:9.5px;line-height:1.2;white-space:nowrap}
+.cd .pin{color:var(--pos)}.cd .pout{color:var(--neg)}
+.cd.hoje{border-color:var(--roxo)}
+.cd.sel{background:rgba(139,124,248,.28);border-color:var(--roxo)}
+.cd.aperto{box-shadow:inset 0 -3px 0 var(--warn)}
+.cd.atraso{box-shadow:inset 0 -3px 0 var(--viz-verm)}
+.plano{margin-top:14px;padding-top:12px;border-top:1px dashed var(--line)}
+#qa-mic.ouvindo{border-color:var(--neg);color:var(--neg);animation:pulsa 1s infinite}
+@keyframes pulsa{50%{opacity:.55}}
 .card.alerta{border-color:rgba(242,194,102,.55);background:linear-gradient(160deg,rgba(242,194,102,.12),var(--surface) 60%)}
 .card.alerta.ruim{border-color:rgba(230,103,103,.6);background:linear-gradient(160deg,rgba(230,103,103,.14),var(--surface) 60%)}
 
@@ -250,6 +271,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
     <button class="tab" role="tab" data-tab="resumo">RESUMO</button>
     <button class="tab" role="tab" data-tab="rendas">RENDAS</button>
     <button class="tab" role="tab" data-tab="despesas">DESPESAS</button>
+    <button class="tab" role="tab" data-tab="agenda">📅 AGENDA</button>
     <button class="tab" role="tab" data-tab="corridas">🚗 CORRIDAS</button>
     <button class="tab" role="tab" data-tab="inv">INVESTIMENTOS</button>
   </nav>
@@ -550,6 +572,419 @@ function melhoresDias(){
     .sort((a,b)=>b.porHora-a.porHora);
 }
 
+/* ---------- dívidas parceladas ---------- */
+function dividaInfo(x){
+  const pagasApp=S.lanc.filter(l=>l.tipo==="fixa"&&l.refId===x.id).length;
+  const hoje=ymNow(), pagoMes=!!monthData(hoje).pagByRef[x.id];
+  if(x.parcelas){
+    const n=+x.parcelas, pagas=Math.min(n,(+x.jaPagas||0)+pagasApp+(+x.adiantadas||0)), faltam=Math.max(0,n-pagas);
+    return {n,pagas,faltam,falta:round2(faltam*(+x.valor||0)),fim:x.fimMes,p:n?pagas/n:0};
+  }
+  if(validYM(x.fimMes)){
+    const faltam=Math.max(0,diffM(hoje,x.fimMes)+1-(pagoMes?1:0));
+    return {n:null,pagas:null,faltam,falta:round2(faltam*(+x.valor||0)),fim:x.fimMes,p:null};
+  }
+  return null;
+}
+function dividas(){
+  return S.fixas.filter(x=>x.ativo!==false&&!x.ehCartao).map(x=>({x,i:dividaInfo(x)}))
+    .filter(o=>o.i&&o.i.faltam>0).sort((a,b)=>(a.i.fim||"").localeCompare(b.i.fim||""));
+}
+
+/* ---------- VExpenses (benefício) ---------- */
+function vexFonte(){return S.fontes.find(f=>f.id===S.cfg.vexFonteId)||null}
+function vexInfo(mes){
+  const f=vexFonte();
+  const usouL=l=>(l.tipo==="avulsa"||l.tipo==="fixa")&&l.forma==="vexpenses";
+  const usadoMes=sum(S.lanc.filter(l=>usouL(l)&&l.mes===mes).map(l=>l.valor));
+  const recebMes=f?sum(S.lanc.filter(l=>l.tipo==="renda"&&l.refId===f.id&&l.mes===mes).map(l=>l.valor)):0;
+  const recebTot=f?sum(S.lanc.filter(l=>l.tipo==="renda"&&l.refId===f.id).map(l=>l.valor)):0;
+  const usadoTot=sum(S.lanc.filter(usouL).map(l=>l.valor));
+  return {f,mensal:f?fontePrev(f):0,recebMes,usadoMes,saldo:round2(recebTot-usadoTot)};
+}
+/* cadastra sozinho o benefício VExpenses de R$ 1.070 na primeira vez que abre */
+let vexChecado=false;
+async function garantirVex(){
+  if(vexChecado||S.cfg.vexSetup)return;
+  vexChecado=true;
+  const ja=S.fontes.find(f=>/vexpens/i.test(f.nome||""));
+  const id=ja?ja.id:uid();
+  if(!ja){
+    const ok=await dbSet("fontes",id,{nome:"VExpenses (benefício)",cat:"Auxílio",tipo:"mensal",valor:1070,
+      ativo:true,mesRef:ymNow(),criadoEm:todayISO()});
+    if(!ok){vexChecado=false;return;}
+  }
+  await cfgSet({vexSetup:true,vexFonteId:id});
+}
+
+/* ---------- previsão do fim do mês ---------- */
+function previsaoMes(){
+  const mes=ymNow(), d=monthData(mes);
+  const dia=+todayISO().slice(8,10), diasMes=new Date(+mes.slice(0,4),+mes.slice(5,7),0).getDate();
+  const restam=diasMes-dia;
+  const rendPend=sum(d.fontes.filter(f=>!d.recByRef[f.id]).map(fontePrev));
+  const fatComp=sum(d.faturaCartao.map(l=>l.valor));
+  const fixPend=sum(d.fixas.filter(x=>!d.pagByRef[x.id]).map(x=>round2((+x.valor||0)+(x.ehCartao?fatComp:0))));
+  const futPend=d.futuroPrev;
+  /* ritmo dos gastos do dia a dia (avulsas) — com menos de 3 dias ainda não dá pra projetar */
+  const porDia=dia>=3?round2(d.avulso/dia):null;
+  const avulsoProj=porDia!=null?round2(d.avulso+porDia*restam):d.avulso;
+  const entra=round2(d.rendReal+rendPend);
+  const sai=round2(d.fixoReal+fixPend+avulsoProj+futPend+d.guard);
+  const saldo=round2(entra-sai);
+  /* quanto ainda dá pra gastar por dia sem ficar negativo */
+  const folga=round2(entra-(d.fixoReal+fixPend+futPend+d.guard+d.avulso));
+  const podeDia=restam>0?round2(folga/restam):null;
+  return {mes,dia,diasMes,restam,entra,sai,saldo,porDia,avulsoProj,fixPend,futPend,rendPend,podeDia,folga};
+}
+
+/* ---------- raio-x das assinaturas ---------- */
+const CATS_ASSIN=["Assinaturas","Planos"];
+function assinaturas(){
+  const hoje=ymNow(), lim=addMonths(hoje,-2);
+  const out=[];
+  for(const x of S.fixas){
+    if(!fixaAplica(x,hoje)||x.ehCartao)continue;
+    if(CATS_ASSIN.includes(x.cat))out.push({nome:x.nome,mensal:+x.valor||0,origem:"fixa"});
+  }
+  /* compras avulsas/crédito de assinatura que se repetem nos últimos 3 meses */
+  const grupos={};
+  for(const l of S.lanc){
+    if(!["avulsa","cartao"].includes(l.tipo)||!CATS_ASSIN.includes(l.cat))continue;
+    if((l.mes||"")<lim||(l.mes||"")>hoje)continue;
+    const k=semAcento((l.desc||"").replace(/\s*\(\d+\/\d+\)\s*$/,"")).trim()||"assinatura";
+    const g=grupos[k]||(grupos[k]={nome:(l.desc||"Assinatura").replace(/\s*\(\d+\/\d+\)\s*$/,""),meses:{},tot:0});
+    g.meses[l.mes]=(g.meses[l.mes]||0)+(+l.valor||0);g.tot+=+l.valor||0;
+  }
+  for(const k in grupos){
+    const g=grupos[k], n=Object.keys(g.meses).length;
+    if(out.some(o=>semAcento(o.nome)===semAcento(g.nome)))continue;
+    out.push({nome:g.nome,mensal:round2(g.tot/n),origem:n>=2?"repete":"1x"});
+  }
+  return out.sort((a,b)=>b.mensal-a.mensal);
+}
+
+/* ---------- voz: "mercado cinquenta e seis e noventa" ---------- */
+const NUM_PT={zero:0,um:1,uma:1,dois:2,duas:2,"tres":3,quatro:4,cinco:5,seis:6,sete:7,oito:8,nove:9,dez:10,onze:11,doze:12,treze:13,
+  quatorze:14,catorze:14,quinze:15,dezesseis:16,dezessete:17,dezoito:18,dezenove:19,vinte:20,trinta:30,quarenta:40,cinquenta:50,
+  sessenta:60,setenta:70,oitenta:80,noventa:90,cem:100,cento:100,duzentos:200,trezentos:300,quatrocentos:400,quinhentos:500,
+  seiscentos:600,setecentos:700,oitocentos:800,novecentos:900};
+function palavrasParaNum(toks){
+  let total=0,atual=0,achou=false;
+  for(const t of toks){
+    if(t in NUM_PT){atual+=NUM_PT[t];achou=true;}
+    else if(t==="mil"){atual=(atual||1)*1000;total+=atual;atual=0;achou=true;}
+    else if(/^\d+$/.test(t)){atual+=+t;achou=true;}
+  }
+  return achou?total+atual:null;
+}
+const CAT_PISTA=[
+  ["Mercado",/mercado|supermercado|feira|atacad|hortifruti|padaria|acougue/],
+  ["Alimentação fora",/ifood|lanche|restaurante|almoco|jantar|pizza|hamburguer|cafe|bar\b|marmita|delivery/],
+  ["Transporte",/gasolina|combustivel|posto|alcool|etanol|estacionamento|pedagio|onibus|metro|passagem|uber\b|99\b/],
+  ["Saúde",/farmacia|remedio|medico|consulta|exame|dentista|drogaria/],
+  ["Assinaturas",/netflix|spotify|prime|disney|youtube|globoplay|max\b|deezer|icloud|assinatura/],
+  ["Casa",/aluguel|luz|energia|agua|gas\b|internet|condominio|iptu|limpeza/],
+  ["Lazer",/cinema|show|jogo|passeio|praia|festa|ingresso/],
+  ["Educação",/curso|escola|faculdade|livro|material/],
+  ["Carro",/oficina|mecanico|pneu|oleo|revisao|lavagem|ipva|seguro/]
+];
+function entenderFala(txt){
+  /* "#" marca onde a pessoa falou "reais" (separa reais de centavos) */
+  let t=semAcento(txt).replace(/r\$\s*/g,"").replace(/\breais?\b/g," # ").replace(/\bcentavos?\b/g," ").replace(/\s+/g," ").trim();
+  let valor=null, resto=t;
+  /* 1) número com dígitos: "56,90" "56.90" "56 e 90" "56 reais e 90" */
+  const m=t.match(/(\d+)(?:[.,](\d{1,2})|\s+(?:#\s+)?(?:e\s+)?(\d{2})(?!\d))?(?!\d)/);
+  if(m){valor=+(m[1]+"."+((m[2]||m[3]||"0").padEnd(2,"0")));resto=t.replace(m[0]," ");}
+  else{
+    /* 2) por extenso */
+    const toks=t.split(" ");
+    const ehNum=w=>w in NUM_PT||w==="mil";
+    const idx=toks.map((w,i)=>ehNum(w)?i:-1).filter(i=>i>=0);
+    if(idx.length){
+      const ini=idx[0], fim=idx[idx.length-1];
+      const trecho=toks.slice(ini,fim+1);
+      let reaisT=trecho, centT=[];
+      const cerq=trecho.indexOf("#");
+      if(cerq>=0){reaisT=trecho.slice(0,cerq);centT=trecho.slice(cerq+1);}
+      else{
+        /* "cinquenta e seis e noventa": o último "e" só separa centavos quando
+           não dá pra ser parte do mesmo número (ex: "cento e vinte e cinco" = 125) */
+        for(let k=trecho.length-1;k>0;k--){
+          if(trecho[k]!=="e")continue;
+          const antes=trecho[k-1], vA=antes==="mil"?1000:NUM_PT[antes];
+          const cent=palavrasParaNum(trecho.slice(k+1));
+          if(vA==null||cent==null||cent>=100)continue;
+          const compoe=vA>=100||(vA>=20&&vA%10===0&&cent<10);
+          if(!compoe){reaisT=trecho.slice(0,k);centT=trecho.slice(k+1);}
+          break;
+        }
+      }
+      const reais=palavrasParaNum(reaisT.filter(w=>w!=="#"));
+      const cent=centT.length?palavrasParaNum(centT):0;
+      if(reais!=null)valor=round2(reais+(cent&&cent<100?cent:0)/100);
+      resto=toks.slice(0,ini).concat(toks.slice(fim+1)).join(" ");
+    }
+  }
+  const desc=resto.replace(/#/g," ").replace(/\b(e|de|no|na|do|da|com|paguei|gastei|foi)\b/g," ").replace(/\s+/g," ").trim();
+  let cat="Outros";
+  for(const [c,re] of CAT_PISTA)if(re.test(t)){cat=c;break;}
+  /* devolve a descrição com os acentos que a pessoa falou ("farmácia", não "farmacia") */
+  const sobra=new Set(desc.split(" ").filter(Boolean));
+  const comAcento=String(txt||"").split(/\s+/).filter(w=>sobra.has(semAcento(w).replace(/[^a-z0-9]/g,""))).join(" ").toLowerCase();
+  const d2=comAcento||desc;
+  return {valor,desc:d2?d2.charAt(0).toUpperCase()+d2.slice(1):"",cat};
+}
+
+/* ---------- plano pra quitar as dívidas ---------- */
+function simularQuitacao(extra,estrategia){
+  const ds=dividas().map(o=>({id:o.x.id,nome:o.x.nome,parc:+o.x.valor||0,saldo:o.i.falta,fim:null}));
+  if(!ds.length)return null;
+  let mes=ymNow(), livre=0, pool=0, n=0;
+  const ordem=()=>ds.filter(d=>d.saldo>0).sort(estrategia==="menor"?(a,b)=>a.saldo-b.saldo:(a,b)=>b.parc-a.parc);
+  while(ds.some(d=>d.saldo>0)&&n<600){
+    pool=extra+livre;
+    for(const d of ds){if(d.saldo<=0)continue;const pg=Math.min(d.parc,d.saldo);d.saldo=round2(d.saldo-pg);}
+    for(const d of ordem()){if(pool<=0)break;const pg=Math.min(pool,d.saldo);d.saldo=round2(d.saldo-pg);pool=round2(pool-pg);}
+    for(const d of ds)if(d.saldo<=0&&!d.fim){d.fim=mes;livre=round2(livre+d.parc);}
+    mes=addMonths(mes,1);n++;
+  }
+  const fimGeral=ds.map(d=>d.fim).filter(Boolean).sort().pop();
+  return {fim:fimGeral,ordem:ds.slice().sort((a,b)=>(a.fim||"").localeCompare(b.fim||""))};
+}
+
+/* ---------- relatório do ano ---------- */
+function dadosAno(ano){
+  const meses=[];
+  for(let m=1;m<=12;m++){const ym=ano+"-"+pad(m);const d=monthData(ym);meses.push({ym,rec:d.rendReal,gas:d.gasto,gua:d.guard,sob:d.saldo,cat:gastoPorCat(ym)});}
+  const cats={};
+  for(const m of meses)for(const c in m.cat)cats[c]=round2((cats[c]||0)+m.cat[c]);
+  const comDado=meses.filter(m=>m.rec||m.gas||m.gua);
+  return {ano,meses,cats:Object.entries(cats).sort((a,b)=>b[1]-a[1]),
+    rec:sum(meses.map(m=>m.rec)),gas:sum(meses.map(m=>m.gas)),gua:sum(meses.map(m=>m.gua)),sob:sum(meses.map(m=>m.sob)),
+    caro:comDado.slice().sort((a,b)=>b.gas-a.gas)[0]||null, melhor:comDado.slice().sort((a,b)=>b.sob-a.sob)[0]||null,
+    nMeses:comDado.length};
+}
+
+/* ---------- meta de corrida do mês: quanto preciso fazer ---------- */
+function metaCorrida(){
+  const mes=ymNow(), d=monthData(mes);
+  const dia=+todayISO().slice(8,10), diasMes=new Date(+mes.slice(0,4),+mes.slice(5,7),0).getDate();
+  const restam=Math.max(0,diasMes-dia+1);   /* conta hoje: ainda dá pra rodar */
+  const daCorr=l=>!!l.corridaId;
+  const corrRenda=sum(d.lan.filter(l=>l.tipo==="renda"&&daCorr(l)).map(l=>l.valor));
+  const corrCusto=sum(d.lan.filter(l=>l.tipo==="avulsa"&&daCorr(l)).map(l=>l.valor));
+  /* a previsão do mês SEM as corridas: o buraco que elas precisam cobrir */
+  const rendPend=sum(d.fontes.filter(f=>!d.recByRef[f.id]).map(fontePrev));
+  const fatComp=sum(d.faturaCartao.map(l=>l.valor));
+  const fixPend=sum(d.fixas.filter(x=>!d.pagByRef[x.id]).map(x=>round2((+x.valor||0)+(x.ehCartao?fatComp:0))));
+  const avSem=round2(d.avulso-corrCusto);
+  const porDia=dia>=3?avSem/dia:0;
+  const avProj=round2(avSem+porDia*Math.max(0,diasMes-dia));
+  const entraSem=round2(d.rendReal-corrRenda+rendPend);
+  const saiSem=round2(d.fixoReal+fixPend+avProj+d.futuroPrev+d.guard);
+  const saldoSem=round2(entraSem-saiSem);
+  const cfg=S.cfg.metaCorr||{};
+  const metasMes=cfg.metas===false?0:sum(S.metas.map(m=>{const i=metaInfo(m);return i.falta>0&&i.porMes?i.porMes:0;}));
+  const extraDiv=cfg.dividas===false?0:(+S.cfg.extraDivida||0);
+  const sobra=+cfg.sobra||0;
+  const buraco=Math.max(0,round2(-saldoSem));
+  const fixa=+cfg.fixa||0;
+  const precisa=fixa>0?fixa:round2(buraco+metasMes+extraDiv+sobra);
+  const feito=round2(corrRenda-corrCusto);
+  const falta=Math.max(0,round2(precisa-feito));
+  /* médias de tudo que tu já rodou */
+  const r=resumoCorridas(S.corridas);
+  const lucroDia=r.dias?round2(r.lucro/r.dias):null;
+  const custoPct=r.bruto>0?r.custo/r.bruto:null;
+  const diasPrec=lucroDia>0?Math.ceil(falta/lucroDia):null;
+  const horasPrec=r.porHora>0?round2(falta/r.porHora):null;
+  const brutoPrec=custoPct!=null&&custoPct<1?round2(falta/(1-custoPct)):null;
+  const kmPrec=r.km>0&&r.bruto>0&&brutoPrec!=null?Math.round(brutoPrec/(r.bruto/r.km)):null;
+  return {mes,dia,diasMes,restam,precisa,feito,falta,buraco,metasMes,extraDiv,sobra,fixa,saldoSem,
+    lucroDia,diasPrec,horasPrec,brutoPrec,kmPrec,porDiaRest:restam>0?round2(falta/restam):null,
+    temHist:r.dias>0,p:precisa>0?Math.min(1,feito/precisa):1};
+}
+
+/* ---------- custo de vida médio (base da reserva e da nota) ---------- */
+function custoVida(){
+  const hoje=ymNow(), ms=[1,2,3].map(i=>addMonths(hoje,-i)).map(monthData).filter(d=>d.gasto>0);
+  if(ms.length)return {valor:round2(sum(ms.map(d=>d.gasto))/ms.length),base:ms.length+" mês(es) anteriores"};
+  const d=monthData(hoje);
+  return {valor:round2(Math.max(d.gasto,d.fixoPrev)),base:"este mês"};
+}
+function rendaMedia(){
+  const hoje=ymNow(), ms=[0,1,2].map(i=>addMonths(hoje,-i)).map(monthData);
+  const reais=ms.filter(d=>d.rendReal>0);
+  if(reais.length)return round2(sum(reais.map(d=>d.rendReal))/reais.length);
+  return monthData(hoje).rendPrev;
+}
+
+/* ---------- 1) reserva de emergência ---------- */
+function reservaInfo(){
+  const liq=S.inv.filter(i=>(i.liquidez||"diaria")==="diaria"||liquidezInfo(i).cls==="pos");
+  const total=sum(liq.map(i=>i.atual));
+  const cv=custoVida();
+  const meses=cv.valor>0?round2(total/cv.valor):null;
+  const ideal=round2(cv.valor*6);
+  return {total,custo:cv.valor,base:cv.base,meses,ideal,falta:Math.max(0,round2(ideal-total)),nInv:liq.length};
+}
+
+/* ---------- 2) nota da saúde financeira ---------- */
+function saudeFinanceira(){
+  const hoje=ymNow(), d=monthData(hoje), renda=rendaMedia();
+  const lin=(v,bom,ruim)=>Math.max(0,Math.min(1,(v-ruim)/(bom-ruim)));
+  const comp=renda>0?round2(d.fixoPrev/renda):null;
+  const res=reservaInfo();
+  const dv=dividas(), deve=sum(dv.map(o=>o.i.falta));
+  const gua=[0,1,2].map(i=>monthData(addMonths(hoje,-i)).guard), guaMed=sum(gua)/3;
+  const pou=renda>0?guaMed/renda:0;
+  const itens=[
+    {k:"comp",nome:"Contas fixas",pts:comp==null?12:Math.round(25*lin(comp,0.3,0.7)),
+      txt:comp==null?"cadastra tuas rendas pra eu calcular":Math.round(comp*100)+"% da renda vai pras fixas",
+      dica:"Tenta deixar as contas fixas abaixo de 30% do que entra — renegocia plano, seguro, assinatura."},
+    {k:"res",nome:"Reserva",pts:res.meses==null?0:Math.round(25*Math.min(1,res.meses/6)),
+      txt:res.meses==null?"sem reserva calculada":String(res.meses).replace(".",",")+" mês(es) de custo de vida",
+      dica:"Monta a reserva de emergência: 6 meses de custo de vida num investimento de resgate diário."},
+    {k:"div",nome:"Dívidas",pts:renda>0?Math.round(25*lin(deve/renda,0,6)):(deve>0?0:25),
+      txt:deve>0?"deve "+fmt(deve)+(renda>0?" ("+String(round2(deve/renda)).replace(".",",")+"× a renda)":""):"sem dívida parcelada 👏",
+      dica:"Quita as dívidas mais rápido: usa o plano 🚀 na aba Despesas e o ADIANTAR quando sobrar."},
+    {k:"pou",nome:"Guardando",pts:Math.round(25*lin(pou,0.1,0)),
+      txt:renda>0?"guarda "+Math.round(pou*100)+"% da renda (média 3 meses)":"—",
+      dica:"Guarda pelo menos 10% do que entra todo mês — de preferência logo que o dinheiro cai."}
+  ];
+  const nota=sum(itens.map(i=>i.pts));
+  const pior=itens.slice().sort((a,b)=>a.pts-b.pts)[0];
+  const faixa=nota>=80?["Ótima","pos"]:nota>=60?["Boa","pos"]:nota>=40?["Atenção","warntx"]:["Crítica","neg"];
+  return {nota:Math.round(nota),itens,pior,faixa};
+}
+
+/* ---------- 3) gasto fora do normal ---------- */
+/* só o gasto do dia a dia (avulsas e compras no crédito): conta fixa é esperada, não é "fora do normal" */
+function gastoVarPorCat(mes){
+  const by={};
+  for(const l of S.lanc){
+    if(l.mes!==mes||!(l.tipo==="avulsa"||l.tipo==="cartao")||l.corridaId||l.dividaId)continue;
+    const c=l.cat||"Outros";by[c]=round2((by[c]||0)+(+l.valor||0));
+  }
+  return by;
+}
+function foraDoNormal(mes){
+  const hoje=ymNow(), atual=gastoVarPorCat(mes);
+  const ant=[1,2,3].map(i=>addMonths(mes,-i)).filter(m=>monthData(m).gasto>0).map(gastoVarPorCat);
+  if(!ant.length)return [];
+  let fator=1;
+  if(mes===hoje){
+    const dia=+todayISO().slice(8,10), diasMes=new Date(+mes.slice(0,4),+mes.slice(5,7),0).getDate();
+    if(dia<7)return [];
+    fator=diasMes/dia;
+  }
+  const out=[];
+  for(const c in atual){
+    const media=sum(ant.map(a=>a[c]||0))/ant.length;
+    if(!(media>0))continue;
+    const proj=round2(atual[c]*fator), p=proj/media-1;
+    if(p>=0.3&&proj-media>=50)out.push({cat:c,atual:atual[c],proj,media:round2(media),p,proj:proj});
+  }
+  return out.sort((a,b)=>b.p-a.p);
+}
+
+/* ---------- 4) calendário do mês ---------- */
+function agendaMes(mes){
+  const d=monthData(mes), hoje=todayISO();
+  const ultimo=new Date(+mes.slice(0,4),+mes.slice(5,7),0).getDate();
+  const dias={};
+  const add=(dia,ev)=>{dia=Math.min(ultimo,Math.max(1,dia||1));(dias[dia]=dias[dia]||[]).push(ev);};
+  const semDia=[];
+  for(const f of d.fontes){
+    const l=d.recByRef[f.id];
+    if(l)add(+String(l.data||"").slice(8,10)||1,{t:"in",nome:f.nome,valor:l.valor,ok:true});
+    else if(f.diaReceb)add(+f.diaReceb,{t:"in",nome:f.nome,valor:fontePrev(f),ok:false});
+    else semDia.push({t:"in",nome:f.nome,valor:fontePrev(f)});
+  }
+  for(const l of d.lan.filter(l=>l.tipo==="renda"&&!l.refId))add(+String(l.data||"").slice(8,10)||1,{t:"in",nome:l.desc||"Renda",valor:l.valor,ok:true});
+  const fat=sum(d.faturaCartao.map(q=>q.valor));
+  for(const x of d.fixas){
+    const l=d.pagByRef[x.id], v=round2((+x.valor||0)+(x.ehCartao?fat:0));
+    if(l)add(+String(l.data||"").slice(8,10)||(+x.diaVenc||1),{t:"out",nome:x.nome,valor:l.valor,ok:true});
+    else if(x.diaVenc)add(+x.diaVenc,{t:"out",nome:x.nome,valor:v,ok:false,atrasada:mes+"-"+pad(Math.min(+x.diaVenc,ultimo))<hoje});
+    else semDia.push({t:"out",nome:x.nome,valor:v});
+  }
+  for(const l of d.lan.filter(l=>l.tipo==="avulsa"||l.tipo==="aporte"||l.tipo==="futura"))
+    add(+String(l.data||"").slice(8,10)||1,{t:"out",nome:l.desc||(l.tipo==="aporte"?"Guardado":"Gasto"),valor:l.valor,ok:l.tipo!=="futura",avulsa:l.tipo==="avulsa"});
+  /* saldo do mês dia a dia (entradas − saídas, desde o dia 1) */
+  let acc=0;const saldo={};let apertado=[];
+  for(let i=1;i<=ultimo;i++){
+    for(const e of (dias[i]||[]))acc=round2(acc+(e.t==="in"?e.valor:-e.valor));
+    saldo[i]=acc;if(acc<0&&(dias[i]||[]).some(e=>e.t==="out"))apertado.push(i);
+  }
+  return {mes,ultimo,dias,saldo,semDia,apertado,primeiroSem:new Date(+mes.slice(0,4),+mes.slice(5,7)-1,1).getDay()};
+}
+
+/* ---------- 6) foto do comprovante ---------- */
+function comprimirFoto(file){
+  return new Promise((res,rej)=>{
+    const img=new Image(), url=URL.createObjectURL(file);
+    img.onload=()=>{
+      const max=1280, k=Math.min(1,max/Math.max(img.width,img.height));
+      const c=document.createElement("canvas");c.width=Math.round(img.width*k);c.height=Math.round(img.height*k);
+      c.getContext("2d").drawImage(img,0,0,c.width,c.height);URL.revokeObjectURL(url);
+      c.toBlob(b=>b?res(b):rej(new Error("falhou")),"image/jpeg",0.72);
+    };
+    img.onerror=()=>{URL.revokeObjectURL(url);rej(new Error("imagem inválida"));};
+    img.src=url;
+  });
+}
+function anexarFoto(l){
+  const inp=document.createElement("input");
+  inp.type="file";inp.accept="image/*";inp.setAttribute("capture","environment");
+  inp.onchange=async()=>{
+    const f=inp.files&&inp.files[0];if(!f)return;
+    toast("Enviando a foto…");
+    let blob;try{blob=await comprimirFoto(f);}catch(_){toast("Não consegui ler essa imagem");return;}
+    let ref;
+    if(S.mem){ref=await new Promise(r=>{const fr=new FileReader();fr.onload=()=>r(fr.result);fr.readAsDataURL(blob);});}
+    else{
+      if(!USER)return;
+      const path=USER.id+"/"+l.id+"-"+Date.now()+".jpg";
+      const {error}=await sb.storage.from("comprovantes").upload(path,blob,{contentType:"image/jpeg",upsert:true});
+      if(error){toast(/bucket|not found/i.test(error.message)?"Falta criar o espaço das fotos no Supabase (roda o SQL das fotos)":"Não enviou a foto: "+error.message);return;}
+      if(l.foto&&!/^data:/.test(l.foto))sb.storage.from("comprovantes").remove([l.foto]).catch(()=>{});
+      ref=path;
+    }
+    const ok=await dbSet("lanc",l.id,{...stripId(l),foto:ref});
+    if(ok)toast("Comprovante anexado 📎");
+  };
+  inp.click();
+}
+async function verFoto(l){
+  let url=l.foto;
+  if(!/^data:/.test(url)){
+    const {data,error}=await sb.storage.from("comprovantes").createSignedUrl(l.foto,300);
+    if(error||!data){toast("Não consegui abrir a foto");return;}
+    url=data.signedUrl;
+  }
+  const dlg=$("#dlg");
+  dlg.innerHTML='<form class="f" method="dialog"><h3>📎 '+esc(l.desc||"Comprovante")+'</h3><p class="fsub">'+esc(fmt(l.valor))+' · '+esc(dBR(l.data||""))+'</p>'
+    +'<img src="'+esc(url)+'" alt="Comprovante" style="width:100%;border-radius:10px;margin-top:8px;max-height:70vh;object-fit:contain;background:#000">'
+    +'<div class="foot"><button type="button" class="btn danger mini" id="ft-del">TIRAR FOTO</button><span class="spacer"></span>'
+    +'<button type="button" class="btn" id="ft-troca">TROCAR</button><button type="submit" class="btn primary">FECHAR</button></div></form>';
+  dlg.onclick=e=>{if(e.target===dlg)dlg.close();};
+  dlg.showModal();
+  $("#ft-troca").onclick=()=>{dlg.close();anexarFoto(l);};
+  let conf=0;
+  $("#ft-del").onclick=async()=>{
+    if(!conf){conf=1;$("#ft-del").textContent="CONFIRMA?";return;}
+    if(!S.mem&&!/^data:/.test(l.foto))await sb.storage.from("comprovantes").remove([l.foto]).catch(()=>{});
+    const novo={...stripId(l)};delete novo.foto;
+    const ok=await dbSet("lanc",l.id,novo);
+    dlg.close();if(ok)toast("Foto removida");
+  };
+}
+function clipe(l){
+  return '<button class="iconb'+(l.foto?' comfoto':'')+'" data-act="'+(l.foto?'verFoto':'foto')+'" data-id="'+l.id+'" aria-label="'+(l.foto?'Ver comprovante':'Anexar comprovante')+'" title="'+(l.foto?'Ver comprovante':'Anexar foto do comprovante')+'">'+(l.foto?'📎':'📷')+'</button>';
+}
+
 /* ---------- 5) busca ---------- */
 function semAcento(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()}
 function buscarLanc(termo,per){
@@ -624,6 +1059,7 @@ async function loadAll(){
   aplicaLockCfg();
   if(S.cfg.pinHash&&ssGet("bolso-unlock")!=="1"&&!S.locked)showLock();
   renderAll();
+  garantirVex();
 }
 function authShow(){$("#auth").hidden=false;setTimeout(()=>{const i=$("#auth-email");if(i)i.focus();},60);}
 function authHide(){$("#auth").hidden=true;}
@@ -799,6 +1235,7 @@ function addFonte(fo){
       {k:"cat",label:"Categoria",type:"select",opts:catRenda(),value:f.cat||"Salário"},
       {k:"tipo",label:"Quando cai",type:"select",reactive:1,value:f.tipo||"mensal",
         opts:[["mensal","Todo mês"],["intervalo","De tempos em tempos (ex: bônus a cada 3 meses)"],["anual","Uma vez por ano (ex: 13º)"],["unica","Só uma vez"]]},
+      {k:"diaReceb",label:"Dia que costuma cair",type:"number",value:f.diaReceb??"",ph:"ex: 5",hint:"Pro calendário mostrar o dia certo. Pode deixar vazio."},
       {k:"valor",label:"Valor previsto (R$)",type:"money",req:1,value:f.valor!=null?String(f.valor).replace(".",","):"",ph:"ex: 5.000,00",
         hint:"Pro bônus que varia, bota o mínimo que você espera — quando cair, você confirma o valor certo."},
       {k:"adicionalPct",label:"Adicional em cima (%)",type:"number",value:f.adicionalPct??"",ph:"ex: 20",
@@ -819,6 +1256,7 @@ function addFonte(fo){
       if(v.tipo==="intervalo")data.intervalo=Math.max(1,Math.round(v.intervalo||3));
       if(v.mesRef)data.mesRef=v.mesRef;
       if(v.fimMes)data.fimMes=v.fimMes;
+      if(v.diaReceb!=null)data.diaReceb=Math.min(31,Math.max(1,Math.round(v.diaReceb)));
       return dbSet("fontes",fo?fo.id:uid(),data);
     }
   });
@@ -834,15 +1272,34 @@ function addFixa(xo){
       {k:"cat",label:"Categoria",type:"select",opts:catDesp(),value:x.cat||"Carro"},
       {k:"valor",label:"Valor mensal (R$)",type:"money",req:1,value:x.valor!=null?String(x.valor).replace(".",","):"",ph:"ex: 1.450,00"},
       {k:"diaVenc",label:"Dia do vencimento",type:"number",value:x.diaVenc??"",ph:"ex: 10"},
-      {k:"fimMes",label:"Última parcela",type:"month",value:x.fimMes||"",hint:"Ex: prestação que acaba em 2028-06. Deixa vazio se não tem fim."},
+      {k:"parcelada",label:"É uma dívida parcelada (tem número certo de parcelas)",type:"check",reactive:1,value:!!x.parcelas},
+      {k:"nParc",label:"Total de parcelas",type:"number",req:1,value:x.parcelas??"",ph:"ex: 9",showIf:v=>v.parcelada},
+      {k:"jaPagas",label:"Quantas já pagou antes de lançar aqui",type:"number",value:x.jaPagas??"",ph:"0",
+        hint:"Ex: comprou em 9x e já pagou 3 → bota 3.",showIf:v=>v.parcelada},
+      {k:"proxMes",label:x.parcelas?"Primeira parcela lançada aqui no app":"A próxima parcela vence em",type:"month",req:1,value:x.parcelas?(x.inicioMes||S.mes):S.mes,
+        hint:"Formato AAAA-MM. Eu calculo sozinho o mês da última parcela.",showIf:v=>v.parcelada},
+      {k:"fimMes",label:"Última parcela",type:"month",value:x.fimMes||"",hint:"Ex: prestação que acaba em 2028-06. Deixa vazio se não tem fim.",showIf:v=>!v.parcelada},
       {k:"ehCartao",label:"É a fatura do cartão de crédito (soma as compras que você lançar no crédito)",type:"check",value:!!x.ehCartao},
     ],
     save:async v=>{
       const data={nome:v.nome,cat:v.cat,valor:v.valor,ativo:x.ativo!==false,criadoEm:x.criadoEm||todayISO()};
       if(v.diaVenc!=null)data.diaVenc=Math.min(31,Math.max(1,Math.round(v.diaVenc)));
-      if(v.fimMes)data.fimMes=v.fimMes;
       if(v.ehCartao)data.ehCartao=true;
-      if(validYM(x.inicioMes))data.inicioMes=x.inicioMes;
+      if(x.adiantadas)data.adiantadas=x.adiantadas;
+      if(v.parcelada){
+        const n=Math.max(1,Math.round(v.nParc||1)), ja=Math.max(0,Math.min(n-1,Math.round(v.jaPagas||0)));
+        if(!validYM(v.proxMes)){toast("Informa o mês da próxima parcela (ex: "+ymNow()+")");return false;}
+        /* se já tem parcela paga pelo app, o começo é o mês da primeira paga aqui */
+        const pagasApp=S.lanc.filter(l=>l.tipo==="fixa"&&l.refId===x.id).map(l=>l.mes).sort();
+        const ini=xo&&x.parcelas&&pagasApp.length&&pagasApp[0]<v.proxMes?pagasApp[0]:v.proxMes;
+        const jaAntes=xo&&x.parcelas&&ini!==v.proxMes?(+x.jaPagas||0):ja;
+        data.parcelas=n;data.jaPagas=jaAntes;data.inicioMes=ini;
+        data.fimMes=addMonths(ini,n-jaAntes-1-(+x.adiantadas||0));
+      }else{
+        if(v.fimMes)data.fimMes=v.fimMes;
+        /* conta nova começa no mês que tu está vendo (não aparece pendente nos meses de antes) */
+        data.inicioMes=validYM(x.inicioMes)?x.inicioMes:S.mes;
+      }
       return dbSet("fixas",xo?xo.id:uid(),data);
     }
   });
@@ -911,8 +1368,8 @@ function editAvulsa(l){
     ],
     save:v=>{
       const fut=v.data>todayISO();
-      const d={mes:v.data.slice(0,7),tipo:fut?"futura":"avulsa",desc:v.desc,cat:v.cat,valor:v.valor,data:v.data,forma:v.forma};
-      if(v.obs)d.obs=v.obs;
+      const d={...stripId(l),mes:v.data.slice(0,7),tipo:fut?"futura":"avulsa",desc:v.desc,cat:v.cat,valor:v.valor,data:v.data,forma:v.forma};
+      if(v.obs)d.obs=v.obs;else delete d.obs;
       return dbSet("lanc",l.id,d);
     }
   });
@@ -1018,6 +1475,7 @@ function editCartao(l){
       if(l.parcela)d.parcela=l.parcela;
       if(l.parcelas)d.parcelas=l.parcelas;
       if(l.valorTotal!=null)d.valorTotal=l.valorTotal;
+      if(l.foto)d.foto=l.foto;
       if(v.obs)d.obs=v.obs;
       return dbSet("lanc",l.id,d);
     }
@@ -1252,6 +1710,23 @@ function addCorrida(co){
     }
   });
 }
+function editMetaCorrida(){
+  const c=S.cfg.metaCorr||{};
+  openForm({
+    title:"Meta de corrida do mês",
+    sub:"No automático eu calculo quanto tu precisa tirar de LUCRO nas corridas pra fechar o mês sem ficar no vermelho.",
+    fields:[
+      {k:"modo",label:"Como calcular",type:"select",reactive:1,value:c.fixa>0?"fixa":"auto",
+        opts:[["auto","Automático — o que falta pras contas fecharem"],["fixa","Valor fixo — eu escolho"]]},
+      {k:"fixa",label:"Quero tirar de lucro no mês (R$)",type:"money",req:1,value:c.fixa?String(c.fixa).replace(".",","):"",ph:"ex: 2.000,00",showIf:v=>v.modo==="fixa"},
+      {k:"sobra",label:"E ainda quero que sobre (R$)",type:"money",value:c.sobra?String(c.sobra).replace(".",","):"",ph:"ex: 300,00",
+        hint:"Um dinheiro livre no fim do mês, além de pagar tudo.",showIf:v=>v.modo==="auto"},
+      {k:"metas",label:"Incluir o que preciso guardar pras metas",type:"check",value:c.metas!==false,showIf:v=>v.modo==="auto"},
+      {k:"dividas",label:"Incluir o extra pra quitar as dívidas mais rápido",type:"check",value:c.dividas!==false,showIf:v=>v.modo==="auto"}
+    ],
+    save:v=>cfgSet({metaCorr:v.modo==="fixa"?{fixa:v.fixa||0,metas:c.metas,dividas:c.dividas}:{fixa:0,sobra:v.sobra||0,metas:!!v.metas,dividas:!!v.dividas}})
+  });
+}
 function editDesgaste(){
   openForm({
     title:"Desgaste do carro",
@@ -1260,6 +1735,67 @@ function editDesgaste(){
       hint:"Não sabe? R$ 0,20 a R$ 0,35 por km é comum em carro popular. Deixa vazio pra não usar."}],
     save:v=>cfgSet({desgasteKm:v.desg||0})
   });
+}
+
+/* ---------- adiantar parcela ---------- */
+function adiantarParcela(x){
+  const i=dividaInfo(x);
+  if(!i||i.faltam<=0){toast("Essa já está quitada 🎉");return;}
+  openForm({
+    title:"Adiantar — "+x.nome,
+    sub:"Faltam "+i.faltam+" parcela(s) de "+fmt(x.valor)+". Adiantando, a última some e tu quita antes.",
+    saveLabel:"ADIANTAR",
+    reactiveAll:1,
+    fields:[
+      {k:"n",label:"Quantas parcelas vai adiantar",type:"number",req:1,value:"1",hint:"Máximo "+i.faltam+"."},
+      {k:"valor",label:"Valor pago (R$)",type:"money",value:"",ph:"deixa vazio = parcelas × "+fmt(x.valor),
+        hint:"Se pagou com desconto, bota o valor que pagou de verdade."},
+      {k:"forma",label:"Forma de pagamento",type:"select",opts:FORMAS.filter(f=>f[0]!=="credito"),value:"pix"},
+      {k:"data",label:"Data",type:"date",req:1,value:todayISO()}
+    ],
+    save:async v=>{
+      const n=Math.max(1,Math.min(i.faltam,Math.round(v.n||1)));
+      const valor=v.valor>0?v.valor:round2(n*(+x.valor||0));
+      const ok=await dbSet("lanc",uid(),{mes:v.data.slice(0,7),tipo:"avulsa",desc:"Adiantamento — "+x.nome+" ("+n+" parcela"+(n>1?"s":"")+")",
+        cat:x.cat||"Outros",valor,data:v.data,forma:v.forma,dividaId:x.id,adiantou:n});
+      if(!ok)return false;
+      const novo={...stripId(x),adiantadas:(+x.adiantadas||0)+n};
+      if(validYM(x.fimMes))novo.fimMes=addMonths(x.fimMes,-n);
+      const ok2=await dbSet("fixas",x.id,novo);
+      if(ok2){const di=dividaInfo({...novo,id:x.id});
+        toast(di&&di.faltam>0?"Adiantado ✓ — agora termina em "+ymShort(novo.fimMes):"🎉 Dívida quitada!");}
+      return ok2;
+    }
+  });
+}
+function editExtraDivida(){
+  openForm({
+    title:"Quanto dá pra pagar a mais?",
+    sub:"Um valor extra por mês, além das parcelas, pra quitar mais rápido. Eu calculo qual dívida atacar primeiro.",
+    fields:[{k:"extra",label:"Extra por mês (R$)",type:"money",value:S.cfg.extraDivida?String(S.cfg.extraDivida).replace(".",","):"",ph:"ex: 200,00"}],
+    save:v=>cfgSet({extraDivida:v.extra||0})
+  });
+}
+
+/* ---------- lançar gasto falando ---------- */
+function ouvirGasto(){
+  const SR=window.SpeechRecognition||window.webkitSpeechRecognition;
+  if(!SR){toast("Esse navegador não tem microfone pra ditado — no Android, usa o Chrome");return;}
+  const r=new SR();
+  r.lang="pt-BR";r.interimResults=false;r.maxAlternatives=1;
+  const bt=$("#qa-mic");if(bt){bt.classList.add("ouvindo");bt.textContent="🎙️ OUVINDO…";}
+  const fim=()=>{if(bt){bt.classList.remove("ouvindo");bt.textContent="🎤 FALAR";}};
+  r.onresult=e=>{
+    const fala=e.results[0][0].transcript;
+    const g=entenderFala(fala);
+    if(g.valor!=null)$("#qa-valor").value=String(g.valor.toFixed(2)).replace(".",",");
+    if(g.desc)$("#qa-desc").value=g.desc;
+    const sel=$("#qa-cat");if(sel&&[...sel.options].some(o=>o.value===g.cat))sel.value=g.cat;
+    toast(g.valor!=null?"Entendi: "+(g.desc||"gasto")+" · "+fmt(g.valor)+" — confere e clica ADICIONAR":"Ouvi \""+fala+"\" mas não peguei o valor — digita ou fala de novo");
+  };
+  r.onerror=e=>{toast(e.error==="not-allowed"?"Libera o microfone pro site nas configurações do navegador":"Não ouvi direito — tenta de novo");};
+  r.onend=fim;
+  try{r.start();}catch(_){fim();}
 }
 
 /* ---------- 4) restaurar backup ---------- */
@@ -1373,6 +1909,7 @@ function renderAll(){
   else if(S.tab==="despesas")m.innerHTML=vDespesas();
   else if(S.tab==="relatorio")m.innerHTML=vRelatorio();
   else if(S.tab==="corridas")m.innerHTML=vCorridas();
+  else if(S.tab==="agenda")m.innerHTML=vAgenda();
   else m.innerHTML=vInv();
   wire(m);
 }
@@ -1397,13 +1934,13 @@ function wire(root){
       if(a==="atualizar")atualizarValor(rowOf("inv",id));
       if(a==="cdi")editCdi();
       if(a==="pagarFutura")pagarFutura(rowOf("lanc",id));
-      if(a==="goMes"){S.mes=el.dataset.ym;renderAll();}
+      if(a==="goMes"){S.mes=el.dataset.ym;if(S.tab==="relatorio")S.relAno=false;renderAll();}
       if(a==="anoPrev"){S.ano--;renderAll();}
       if(a==="anoNext"){S.ano++;renderAll();}
       if(a==="addCartao")addCartao();
       if(a==="editCartaoCad")addCartao(rowOf("cartoes",id));
       if(a==="editCartao")editCartao(rowOf("lanc",id));
-      if(a==="relatorio"){S.tab="relatorio";renderAll();window.scrollTo(0,0);}
+      if(a==="relatorio"){S.tab="relatorio";S.relAno=false;renderAll();window.scrollTo(0,0);}
       if(a==="voltarResumo"){S.tab="resumo";renderAll();}
       if(a==="dlRel")baixarRel();
       if(a==="backup")baixarBackup();
@@ -1421,6 +1958,19 @@ function wire(root){
       if(a==="addCorrida")addCorrida();
       if(a==="editCorrida")addCorrida(rowOf("corridas",id));
       if(a==="desgaste")editDesgaste();
+      if(a==="metaCorr")editMetaCorrida();
+      if(a==="foto")anexarFoto(rowOf("lanc",id));
+      if(a==="verFoto")verFoto(rowOf("lanc",id));
+      if(a==="diaSel"){S.diaSel=el.dataset.ym;renderAll();}
+      if(a==="metaReserva"){const r=reservaInfo();
+        dbSet("metas",uid(),{nome:"Reserva de emergência",alvo:r.falta,prazo:addMonths(ymNow(),11),inicial:0,criadaEm:todayISO()})
+          .then(ok=>{if(ok)toast("Meta da reserva criada ✓ — "+fmt(r.falta)+" em 12 meses");});}
+      if(a==="adiantar")adiantarParcela(rowOf("fixas",id));
+      if(a==="extraDiv")editExtraDivida();
+      if(a==="mic")ouvirGasto();
+      if(a==="relAno"){S.relAno=true;renderAll();window.scrollTo(0,0);}
+      if(a==="relMes"){S.relAno=false;renderAll();}
+      if(a==="dlAno")baixarAno();
     });
   });
   const qv=$("#qa-valor");
@@ -1484,6 +2034,64 @@ function vResumo(){
     if(quentes.length)
       h+='<div class="banner">🎯 '+quentes.map(s=>'<span>'+esc(s.cat)+' <b class="num '+s.cls+'">'+Math.round(s.p*100)+'%</b> do teto</span>').join(' · ')
         +'<button class="act" data-act="goDespesas">VER →</button></div>';
+  }
+  if(S.mes===ymNow()&&!nada){
+    const pv=previsaoMes();
+    const ruim=pv.saldo<0;
+    h+='<div class="card'+(ruim?' alerta ruim':'')+'"><div class="cardhead"><h2>🔮 Previsão do fim do mês</h2>'
+      +'<span class="tot">dia '+pv.dia+' de '+pv.diasMes+'</span></div>'
+      +'<p style="margin:6px 0 4px;font-size:15px">Se continuar nesse ritmo, tu fecha '+esc(MESES[+pv.mes.slice(5,7)-1])
+      +' com <b class="num '+(ruim?"neg":"pos")+'" style="font-size:19px">'+esc((pv.saldo>=0?"+":"−")+" "+fmt(Math.abs(pv.saldo)))+'</b></p>'
+      +'<p class="sub" style="margin:0">'
+      +(pv.porDia!=null?'gasto do dia a dia: <b>'+esc(fmt(pv.porDia))+'/dia</b> · ':'')
+      +(pv.fixPend>0?'contas que faltam: '+esc(fmt(pv.fixPend))+' · ':'')
+      +(pv.futPend>0?'planejadas: '+esc(fmt(pv.futPend))+' · ':'')
+      +(pv.rendPend>0?'rendas que ainda caem: '+esc(fmt(pv.rendPend)):'')
+      +'</p>'
+      +(pv.restam>0&&pv.podeDia!=null
+        ?'<p class="sub" style="margin:6px 0 0">'+(pv.podeDia>0
+          ?'Pra não ficar no vermelho, dá pra gastar até <b class="num pos">'+esc(fmt(pv.podeDia))+'/dia</b> nos '+pv.restam+' dias que faltam.'
+          :'<span class="neg">Já passou do que entra: corta o que der até o fim do mês.</span>')+'</p>'
+        :'')
+      +'</div>';
+  }
+  if(S.mes===ymNow()&&!nada){
+    const sf=saudeFinanceira();
+    h+='<div class="card"><div class="cardhead"><h2>❤️ Saúde financeira</h2>'
+      +'<span class="tot"><b class="num '+sf.faixa[1]+'" style="font-size:20px">'+sf.nota+'</b>/100 · <b class="'+sf.faixa[1]+'">'+sf.faixa[0]+'</b></span></div>'
+      +'<div class="track meta" style="height:10px"><div class="fill" style="width:'+Math.max(2,sf.nota)+'%;background:'+(sf.nota>=60?'var(--viz-verde)':sf.nota>=40?'var(--warn)':'var(--viz-verm)')+'"></div></div>'
+      +'<div class="saude">'+sf.itens.map(i=>'<div><span class="sn">'+esc(i.nome)+'</span><b class="num">'+i.pts+'/25</b><span class="st">'+esc(i.txt)+'</span></div>').join('')+'</div>'
+      +(sf.nota<100?'<p class="sub" style="margin:8px 0 0">💡 '+esc(sf.pior.dica)+'</p>':'')+'</div>';
+  }
+  {
+    const fn=foraDoNormal(S.mes);
+    if(fn.length)
+      h+='<div class="card alerta"><h2>📈 Gasto fora do normal</h2><p class="sub">comparando com a tua média dos 3 meses anteriores'+(S.mes===ymNow()?' (projetando o mês inteiro)':'')+'</p><div class="rows">'
+        +fn.slice(0,4).map(f=>'<div class="row"><div class="main"><div class="t">'+esc(f.cat)+'</div>'
+          +'<div class="d">'+(S.mes===ymNow()?'indo pra '+esc(fmt(f.proj))+' no mês':'gastou '+esc(fmt(f.atual)))+' · normal '+esc(fmt(f.media))+'</div></div>'
+          +'<b class="num neg">+'+Math.round(f.p*100)+'%</b></div>').join('')+'</div></div>';
+  }
+  {
+    const vx=vexInfo(S.mes);
+    if(vx.f){
+      const base=vx.recebMes||vx.mensal, p=base>0?Math.min(1,vx.usadoMes/base):0;
+      h+='<div class="card"><div class="cardhead"><h2>💳 VExpenses</h2>'
+        +'<span class="tot">saldo no cartão <b class="num '+(vx.saldo<0?"neg":"pos")+'">'+esc(fmt(vx.saldo))+'</b></span></div>'
+        +'<div class="track meta"><div class="fill'+(p>=1?' ':'')+'" style="width:'+Math.max(2,Math.round(p*100))+'%;'+(p>=1?'background:var(--viz-verm)':p>=0.8?'background:var(--warn)':'')+'"></div></div>'
+        +'<div class="d" style="font-size:12.5px;color:var(--ink-2)">usou <b class="num">'+esc(fmt(vx.usadoMes))+'</b> de '+esc(fmt(base))
+        +' em '+esc(MESES[+S.mes.slice(5,7)-1])+' · sobra <b class="num">'+esc(fmt(round2(base-vx.usadoMes)))+'</b>'
+        +(vx.recebMes?'':' · <span class="warntx">ainda não marcou que caiu</span> <button class="btn mini" data-act="receber" data-id="'+vx.f.id+'">CAIU ✓</button>')
+        +'</div><p class="sub" style="margin:6px 0 0">no lançamento, escolhe "VExpenses" no pagamento que desconta daqui</p></div>';
+    }
+  }
+  {
+    const dv=dividas();
+    if(dv.length){
+      const livre=dv.map(o=>o.i.fim).filter(Boolean).sort().pop();
+      h+='<div class="banner">💸 Dívidas: falta <b class="num">'+esc(fmt(sum(dv.map(o=>o.i.falta))))+'</b>'
+        +(livre?' · livre em <b>'+esc(ymShort(livre))+'</b>':'')
+        +'<button class="act" data-act="goDespesas">VER →</button></div>';
+    }
   }
   h+='<div class="tiles">'
     +tile("RECEBIDO",fmt(d.rendReal),"previsto "+fmt(d.rendPrev),"pos")
@@ -1638,6 +2246,7 @@ function vDespesas(){
     +'<div><label class="fl" for="qa-forma">Pagamento</label><select id="qa-forma">'+FORMAS.map(f=>'<option value="'+f[0]+'">'+esc(f[1])+'</option>').join("")+'</select></div>'
     +'<div id="qa-parcwrap" hidden><label class="fl" for="qa-parc">Parcelas</label><input id="qa-parc" inputmode="numeric" value="1"></div>'
     +'<div class="full"><label class="fl" for="qa-obs">Observação (opcional)</label><input id="qa-obs" placeholder="ex: gasto fora do normal, presente, viagem…"></div>'
+    +'<button class="btn full" id="qa-mic" data-act="mic" title="Fala o gasto: mercado cinquenta e seis e noventa">🎤 FALAR</button>'
     +'<button class="btn primary full" data-act="qa">ADICIONAR GASTO</button>'
     +'</div></div>';
 
@@ -1673,7 +2282,9 @@ function vDespesas(){
       const extraC=x.ehCartao?sum(d.faturaCartao.map(q=>q.valor)):0;
       h+='<div class="row"><div class="main"><div class="t">'+esc(x.nome)+chipEx(x)+' <span class="chip">'+esc(x.cat||"")+'</span></div>'
         +'<div class="d">'+(extraC>0?esc(fmt(x.valor))+' + '+esc(fmt(extraC))+' compras = <b>'+esc(fmt(round2(x.valor+extraC)))+'</b>':esc(fmt(x.valor)))
-        +(x.diaVenc?' · vence dia '+x.diaVenc:'')+(x.fimMes?' · até '+esc(ymShort(x.fimMes)):'')
+        +(x.diaVenc?' · vence dia '+x.diaVenc:'')
+        +(x.parcelas?(()=>{const di=dividaInfo(x);return ' · parcela '+Math.min(di.n,di.pagas+(l?0:1))+'/'+di.n;})():'')
+        +(x.fimMes?' · até '+esc(ymShort(x.fimMes)):'')
         +(atrasada?' · <span class="warntx">em atraso?</span>':'')+'</div></div>'
         +'<div class="valcol">'+(l
           ?'<button class="pill ok" data-act="pagar" data-id="'+x.id+'"><span class="num">'+esc(fmt(l.valor))+'</span> ✓</button>'
@@ -1693,6 +2304,47 @@ function vDespesas(){
   }
   h+='<button class="btn ghost" data-act="addFixa">+ NOVA DESPESA FIXA</button></div>';
 
+  {
+    const dv=dividas();
+    if(dv.length){
+      const tot=sum(dv.map(o=>o.i.falta)), livre=dv.map(o=>o.i.fim).filter(Boolean).sort().pop();
+      h+='<div class="card"><div class="cardhead"><h2>💸 Dívidas parceladas</h2>'
+        +'<span class="tot">ainda falta <b class="num neg">'+esc(fmt(tot))+'</b></span></div>'
+        +'<p class="sub">'+(livre?'tu fica livre de todas em <b>'+esc(ymLabel(livre))+'</b>':'')+'</p><div class="rows">';
+      for(const {x,i} of dv){
+        h+='<div class="row"><div class="main"><div class="t">'+esc(x.nome)+' <span class="chip">'+esc(x.cat||"")+'</span></div>'
+          +(i.n?'<div class="track meta"><div class="fill" style="width:'+Math.max(2,Math.round(i.p*100))+'%"></div></div>':'')
+          +'<div class="d">'+(i.n?'<b>'+i.pagas+' de '+i.n+'</b> pagas · ':'')+'faltam '+i.faltam+' × '+esc(fmt(x.valor))
+          +' = <b class="num">'+esc(fmt(i.falta))+'</b>'+(i.fim?' · última em '+esc(ymShort(i.fim)):'')
+          +' · depois sobra <b class="pos">+'+esc(fmt(x.valor))+'</b>/mês</div></div>'
+          +'<div class="valcol"><button class="btn mini" data-act="adiantar" data-id="'+x.id+'">ADIANTAR</button>'
+          +' <button class="iconb" data-act="editFixa" data-id="'+x.id+'" aria-label="Editar">✎</button></div></div>';
+      }
+      h+='</div>';
+      /* plano pra quitar mais rápido */
+      const extra=+S.cfg.extraDivida||0;
+      const base=simularQuitacao(0,"menor");
+      h+='<div class="plano"><div class="cardhead"><h3 style="margin:0;font-size:13.5px">🚀 Plano pra sair das dívidas</h3>'
+        +'<button class="btn mini" data-act="extraDiv">'+(extra>0?"EXTRA "+esc(fmt(extra))+" ✎":"QUANTO SOBRA?")+'</button></div>';
+      if(!(extra>0)){
+        h+='<p class="sub" style="margin:6px 0 0">Do jeito que tá, tu fica livre em <b>'+esc(base&&base.fim?ymLabel(base.fim):"—")+'</b>. '
+          +'Me diz quanto consegue pagar a mais por mês que eu mostro quanto tempo tu ganha.</p>';
+      }else{
+        const bn=simularQuitacao(extra,"menor"), mp=simularQuitacao(extra,"maior");
+        const melhor=diffM(bn.fim,mp.fim)<0?{nome:"maior parcela primeiro",r:mp}:{nome:"bola de neve (menor dívida primeiro)",r:bn};
+        const ganho=base&&base.fim?diffM(melhor.r.fim,base.fim):0;
+        h+='<p style="margin:8px 0 2px">Com <b class="num">'+esc(fmt(extra))+'</b> a mais por mês, tu fica livre em <b class="pos">'+esc(ymLabel(melhor.r.fim))+'</b>'
+          +(ganho>0?' — <b class="pos">'+ganho+(ganho===1?' mês':' meses')+' antes</b> de '+esc(ymShort(base.fim)):'')+'.</p>'
+          +'<p class="sub" style="margin:0 0 6px">melhor estratégia: '+esc(melhor.nome)+'. Quando uma acaba, a parcela dela vai pra próxima.</p><div class="rows">';
+        melhor.r.ordem.forEach((d,ix)=>{
+          h+='<div class="row"><div class="main"><div class="t">'+(ix+1)+'º '+esc(d.nome)+'</div></div><div class="valcol"><span class="d">quita em <b>'+esc(d.fim?ymShort(d.fim):"—")+'</b></span></div></div>';
+        });
+        h+='</div>';
+      }
+      h+='</div></div>';
+    }
+  }
+
   const fat=d.faturaCartao.slice().sort((a,b)=>(a.data||"").localeCompare(b.data||""));
   const novas=d.comprasNovas.filter(l=>l.mes!==S.mes);
   const multiCart=S.cartoes.length>1;
@@ -1711,7 +2363,7 @@ function vDespesas(){
       for(const l of fat)
         h+='<div class="row"><div class="main"><div class="t">'+esc(l.desc||"Compra")+chipEx(l)+' <span class="chip">'+esc(l.cat||"Outros")+'</span>'+(multiCart&&l.cartaoId?' <span class="chip">'+esc(cartaoNome(l.cartaoId))+'</span>':'')+'</div>'
           +'<div class="d">compra de '+esc(dShort(l.data))+(l.obs?' · '+esc(l.obs):'')+'</div></div>'
-          +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span> <button class="iconb" data-act="editCartao" data-id="'+l.id+'" aria-label="Editar">✎</button></div></div>';
+          +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span> '+clipe(l)+'<button class="iconb" data-act="editCartao" data-id="'+l.id+'" aria-label="Editar">✎</button></div></div>';
       h+='</div>';
     }
     if(novas.length){
@@ -1744,11 +2396,26 @@ function vDespesas(){
         +'<div class="valcol"><span class="num">'+esc(fmt(sum(custoCorr.map(l=>l.valor))))+'</span> <button class="iconb" data-act="goCorridas" aria-label="Ver corridas">→</button></div></div>';
     for(const l of avulsas)
       h+='<div class="row"><div class="main"><div class="t">'+esc(l.desc||"Gasto")+chipEx(l)+' <span class="chip">'+esc(l.cat||"Outros")+'</span></div><div class="d">'+esc(dShort(l.data))+(l.forma?' · '+esc(formaLabel(l.forma)):'')+(l.obs?' · '+esc(l.obs):'')+'</div></div>'
-        +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span> <button class="iconb" data-act="editAvulsa" data-id="'+l.id+'" aria-label="Editar">✎</button></div></div>';
+        +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span> '+clipe(l)+'<button class="iconb" data-act="editAvulsa" data-id="'+l.id+'" aria-label="Editar">✎</button></div></div>';
     h+='</div>';
   }
   h+='</div>';
 
+  {
+    const as=assinaturas();
+    const mens=sum(as.map(a=>a.mensal));
+    h+='<div class="card"><div class="cardhead"><h2>📺 Raio-X das assinaturas</h2>'
+      +(as.length?'<span class="tot"><b class="num">'+esc(fmt(mens))+'</b>/mês</span>':'')+'</div>';
+    if(!as.length)h+='<div class="empty">Coloca Netflix, Spotify, academia, plano de celular… na categoria <b>Assinaturas</b> ou <b>Planos</b> que eu somo tudo aqui.</div>';
+    else{
+      h+='<div class="banner" style="margin-top:8px">Por ano tu gasta <b class="num neg">'+esc(fmt(round2(mens*12)))+'</b> em assinaturas e planos</div><div class="rows">';
+      for(const a of as)
+        h+='<div class="row"><div class="main"><div class="t">'+esc(a.nome)+'</div><div class="d">'+(a.origem==="fixa"?"conta fixa":a.origem==="repete"?"se repete todo mês":"apareceu 1 vez")
+          +' · <b>'+esc(fmt(round2(a.mensal*12)))+'</b>/ano</div></div><span class="num">'+esc(fmt(a.mensal))+'</span></div>';
+      h+='</div><p class="sub" style="margin:8px 0 0">vale ver: alguma dessas tu nem usa mais?</p>';
+    }
+    h+='</div>';
+  }
   h+='<div class="card"><div class="cardhead"><h2>🔎 Buscar gastos</h2></div>'
     +'<p class="sub">ex: "posto", "ifood", "farmácia" — procura no nome, na observação, na categoria e no cartão</p>'
     +'<div class="qa"><div><label class="fl" for="bs-per">Período</label><select id="bs-per">'
@@ -1771,6 +2438,56 @@ function resultadoBusca(){
   return h+'</div>';
 }
 
+/* ----- agenda (calendário do mês) ----- */
+function vAgenda(){
+  const a=agendaMes(S.mes), hoje=todayISO(), mesN=MESES[+S.mes.slice(5,7)-1];
+  const dSel=S.diaSel&&S.diaSel.slice(0,7)===S.mes?+S.diaSel.slice(8,10):(S.mes===ymNow()?+hoje.slice(8,10):1);
+  const totIn=sum(Object.values(a.dias).flat().filter(e=>e.t==="in").map(e=>e.valor));
+  const totOut=sum(Object.values(a.dias).flat().filter(e=>e.t==="out").map(e=>e.valor));
+  let h='<div class="card"><div class="cardhead"><h2>📅 Agenda de '+esc(mesN)+'</h2>'
+    +'<span class="tot">entra <b class="num pos">'+esc(fmt(totIn))+'</b> · sai <b class="num neg">'+esc(fmt(totOut))+'</b></span></div>'
+    +'<p class="sub">verde = dinheiro entrando · vermelho = conta saindo · toca no dia pra ver o que tem</p>';
+  if(a.apertado.length)
+    h+='<div class="banner" style="margin:0 0 10px">⚠️ Dias apertados (sai mais do que entrou até ali): <b>'+a.apertado.slice(0,8).map(d=>pad(d)).join(", ")+'</b>'
+      +(a.apertado.length>8?' e mais '+(a.apertado.length-8):'')+'</div>';
+  h+='<div class="cal"><div class="calh">'+["D","S","T","Q","Q","S","S"].map(x=>'<span>'+x+'</span>').join("")+'</div><div class="calg">';
+  for(let i=0;i<a.primeiroSem;i++)h+='<span class="cd vazio"></span>';
+  for(let dia=1;dia<=a.ultimo;dia++){
+    const ev=a.dias[dia]||[], iso=S.mes+"-"+pad(dia);
+    const inV=sum(ev.filter(e=>e.t==="in").map(e=>e.valor)), outV=sum(ev.filter(e=>e.t==="out").map(e=>e.valor));
+    const cls=["cd"];
+    if(iso===hoje)cls.push("hoje");
+    if(dia===dSel)cls.push("sel");
+    if(a.apertado.includes(dia))cls.push("aperto");
+    if(ev.some(e=>e.atrasada))cls.push("atraso");
+    h+='<button class="'+cls.join(" ")+'" data-act="diaSel" data-ym="'+iso+'"><b>'+dia+'</b>'
+      +(inV?'<i class="pin">+'+esc(fmtK(inV)).replace("R$ ","")+'</i>':'')
+      +(outV?'<i class="pout">−'+esc(fmtK(outV)).replace("R$ ","")+'</i>':'')+'</button>';
+  }
+  h+='</div></div></div>';
+  const evs=(a.dias[dSel]||[]);
+  h+='<div class="card"><div class="cardhead"><h2>Dia '+pad(dSel)+' de '+esc(mesN)+'</h2>'
+    +'<span class="tot">saldo do mês até aqui <b class="num '+(a.saldo[dSel]<0?"neg":"pos")+'">'+esc((a.saldo[dSel]>=0?"+":"−")+" "+fmt(Math.abs(a.saldo[dSel]||0)))+'</b></span></div>';
+  if(!evs.length)h+='<div class="empty">Nada nesse dia.</div>';
+  else{
+    h+='<div class="rows">';
+    for(const e of evs)
+      h+='<div class="row"><div class="main"><div class="t">'+(e.t==="in"?"💚 ":"🔻 ")+esc(e.nome)+'</div>'
+        +'<div class="d">'+(e.t==="in"?(e.ok?"recebido":"previsto pra cair"):(e.ok?"pago":(e.atrasada?'<span class="neg">atrasada</span>':"vence nesse dia")))+'</div></div>'
+        +'<span class="num '+(e.t==="in"?"pos":"neg")+'">'+esc((e.t==="in"?"+ ":"− ")+fmt(e.valor))+'</span></div>';
+    h+='</div>';
+  }
+  h+='</div>';
+  if(a.semDia.length){
+    h+='<div class="card"><h2>Sem dia definido</h2><p class="sub">coloca o dia (✎) que eles entram no calendário</p><div class="rows">';
+    for(const e of a.semDia)
+      h+='<div class="row"><div class="main"><div class="t">'+(e.t==="in"?"💚 ":"🔻 ")+esc(e.nome)+'</div><div class="d">'+(e.t==="in"?"renda — sem \"dia que cai\"":"conta — sem dia de vencimento")+'</div></div>'
+        +'<span class="num">'+esc(fmt(e.valor))+'</span></div>';
+    h+='</div></div>';
+  }
+  return h;
+}
+
 /* ----- corridas ----- */
 function vCorridas(){
   const lista=corridasDoMes(S.mes), r=resumoCorridas(lista);
@@ -1779,6 +2496,41 @@ function vCorridas(){
   let h='<div class="card"><div class="cardhead"><h2>🚗 Corridas de '+esc(mesNome)+'</h2>'
     +'<button class="btn mini primary" data-act="addCorrida">+ LANÇAR DIA</button></div>'
     +'<p class="sub" style="margin:0">Uber, 99, inDrive… lança no fim do dia que eu calculo quanto sobrou de verdade.</p></div>';
+  if(S.mes===ymNow()){
+    const mc=metaCorrida(), mesN=MESES[+mc.mes.slice(5,7)-1];
+    const ok=mc.falta<=0;
+    h+='<div class="card'+(ok?'':' metacorr')+'"><div class="cardhead"><h2>🎯 Meta de '+esc(mesN)+'</h2>'
+      +'<button class="btn mini" data-act="metaCorr">AJUSTAR ✎</button></div>';
+    if(mc.precisa<=0&&!mc.fixa){
+      h+='<p style="margin:8px 0 2px;font-size:15px">As contas de '+esc(mesN)+' já fecham <b class="pos">sem precisar de corrida</b> 👏</p>'
+        +'<p class="sub" style="margin:0">Tudo que tu rodar agora é dinheiro a mais. Quer uma meta mesmo assim? Clica em AJUSTAR e põe quanto quer que sobre.</p>';
+    }else{
+      h+='<p style="margin:8px 0 4px;font-size:15px">Tu precisa tirar <b class="num" style="font-size:20px">'+esc(fmt(mc.precisa))+'</b> de lucro nas corridas</p>'
+        +'<div class="track meta" style="height:12px"><div class="fill'+(ok?' pos':'')+'" style="width:'+Math.max(2,Math.round(mc.p*100))+'%"></div></div>'
+        +'<p class="d" style="margin:4px 0 0;font-size:12.5px;color:var(--ink-2)">já fez <b class="num">'+esc(fmt(mc.feito))+'</b> ('+Math.round(mc.p*100)+'%)'
+        +(ok?' · <b class="pos">🎉 meta batida!</b>':' · faltam <b class="num warntx">'+esc(fmt(mc.falta))+'</b>')+'</p>';
+      if(!ok){
+        const partes=[];
+        if(mc.diasPrec!=null)partes.push('≈ <b>'+mc.diasPrec+' dia'+(mc.diasPrec>1?'s':'')+'</b> rodando');
+        if(mc.horasPrec!=null)partes.push('≈ <b>'+esc(String(Math.ceil(mc.horasPrec)))+' h</b>');
+        if(mc.brutoPrec!=null)partes.push('o app tem que pagar uns <b class="num">'+esc(fmt(mc.brutoPrec))+'</b>');
+        if(mc.kmPrec!=null)partes.push('uns <b>'+mc.kmPrec.toLocaleString("pt-BR")+' km</b>');
+        h+='<div class="banner" style="margin-top:10px">🚗 '+(partes.length?partes.join(' · '):'lança uns dias de corrida que eu calculo quantos dias e horas tu precisa')+'</div>';
+        if(mc.porDiaRest!=null&&mc.restam>0)
+          h+='<p class="sub" style="margin:8px 0 0">Faltam '+mc.restam+' dia'+(mc.restam>1?'s':'')+' no mês: rodando todo dia, dá <b class="num">'+esc(fmt(mc.porDiaRest))+'</b> de lucro por dia.'
+            +(mc.lucroDia!=null?' Tua média é <b class="num">'+esc(fmt(mc.lucroDia))+'</b> por dia.':'')+'</p>';
+      }
+      if(!mc.fixa){
+        const pq=[];
+        if(mc.buraco>0)pq.push('fechar as contas: '+esc(fmt(mc.buraco)));
+        if(mc.metasMes>0)pq.push('metas: '+esc(fmt(mc.metasMes)));
+        if(mc.extraDiv>0)pq.push('extra das dívidas: '+esc(fmt(mc.extraDiv)));
+        if(mc.sobra>0)pq.push('pra sobrar: '+esc(fmt(mc.sobra)));
+        if(pq.length)h+='<p class="sub" style="margin:8px 0 0">de onde vem: '+pq.join(' · ')+'</p>';
+      }else h+='<p class="sub" style="margin:8px 0 0">meta fixa que tu escolheu</p>';
+    }
+    h+='</div>';
+  }
   h+='<div class="tiles">'
     +tile("APP PAGOU",fmt(r.bruto),r.dias+" dia(s)"+(ant.bruto?" · mês passado "+fmt(ant.bruto):""),"pos")
     +tile("CUSTOS",fmt(r.custo),r.custoKm!=null?fmt(r.custoKm)+" por km":"combustível + outros","neg")
@@ -1844,6 +2596,21 @@ function vInv(){
     +tile("APLICADO",fmt(apl),"dinheiro que você colocou","")
     +'<div class="tile"><div class="lbl">RENDIMENTO</div><div class="val num '+(rend<0?"neg":"pos")+'">'+esc((rend>=0?"+":"−")+" "+fmt(Math.abs(rend)))+'</div><div class="sm">'+(apl>0?esc(pct(rend/apl))+" sobre o aplicado":"—")+'</div></div>'
     +'</div>';
+  {
+    const r=reservaInfo();
+    const p=r.meses!=null?Math.min(1,r.meses/6):0;
+    const temMeta=S.metas.some(m=>/reserva/i.test(m.nome||""));
+    h+='<div class="card'+(r.meses!=null&&r.meses<3?' alerta':'')+'"><div class="cardhead"><h2>🛟 Reserva de emergência</h2>'
+      +'<span class="tot">'+(r.meses!=null?'aguenta <b class="num '+(r.meses>=6?"pos":r.meses>=3?"warntx":"neg")+'">'+esc(String(r.meses).replace(".",","))+' mês(es)</b>':'')+'</span></div>'
+      +'<div class="track meta" style="height:10px"><div class="fill'+(p>=1?' pos':'')+'" style="width:'+Math.max(2,Math.round(p*100))+'%"></div></div>'
+      +'<p class="d" style="margin:4px 0 0;font-size:12.5px;color:var(--ink-2)">tem <b class="num">'+esc(fmt(r.total))+'</b> de resgate rápido · ideal <b class="num">'+esc(fmt(r.ideal))+'</b> (6 meses de '+esc(fmt(r.custo))+')</p>'
+      +'<p class="sub" style="margin:6px 0 0">'+(r.custo>0
+        ?(r.falta>0?'Falta <b>'+esc(fmt(r.falta))+'</b> pra ficar tranquilo se a renda parar. Conta só o que dá pra resgatar na hora (liquidez diária ou já liberado).'
+          :'🎉 Reserva completa — tu aguenta 6 meses sem renda.')
+        :'Lança uns gastos pra eu calcular teu custo de vida.')+'</p>'
+      +(r.falta>0&&r.custo>0&&!temMeta?'<button class="btn mini primary" data-act="metaReserva" style="margin-top:10px">CRIAR META DA RESERVA</button>':'')
+      +'</div>';
+  }
   h+=vMetas();
   h+='<div class="banner">CDI de referência: <b class="num">'+(S.cfg.cdi?esc(String(S.cfg.cdi).replace(".",","))+"% a.a.":"não definido")+'</b>'
     +'<button class="act" data-act="cdi">'+(S.cfg.cdi?"ATUALIZAR":"DEFINIR")+' ✎</button></div>';
@@ -1886,12 +2653,69 @@ function relDelta(atual,ant,antL){
   const df=round2(atual-ant);
   return " · vs "+antL+": "+(df>=0?"+":"−")+fmt(Math.abs(df));
 }
+function vRelAno(){
+  const a=dadosAno(+S.mes.slice(0,4));
+  let h='<div class="card"><div class="cardhead"><h2>Relatório do ano — '+a.ano+'</h2><span style="flex:1"></span>'
+    +'<button class="btn mini" data-act="relMes">← MÊS</button>'
+    +'<button class="btn mini primary" data-act="dlAno">BAIXAR</button></div>'
+    +'<p class="sub" style="margin:6px 0 0">'+a.nMeses+' mês(es) com lançamento · troca o ano navegando nos meses lá em cima</p></div>';
+  h+='<div class="tiles">'
+    +tile("RECEBIDO",fmt(a.rec),"no ano","pos")
+    +tile("GASTO",fmt(a.gas),a.nMeses?"média "+fmt(a.gas/a.nMeses)+"/mês":"","neg")
+    +tile("GUARDADO",fmt(a.gua),a.rec>0?pct(a.gua/a.rec)+" do que entrou":"","")
+    +tile("SOBROU",fmt(a.sob),"recebido − gasto − guardado",a.sob<0?"neg":"pos")
+    +'</div>';
+  if(a.caro||a.melhor)
+    h+='<div class="banner">'+(a.caro?'💸 mês mais caro: <b>'+esc(ymLabel(a.caro.ym))+'</b> ('+esc(fmt(a.caro.gas))+')':'')
+      +(a.melhor?' · 🏆 melhor mês: <b>'+esc(ymLabel(a.melhor.ym))+'</b> (sobrou '+esc(fmt(a.melhor.sob))+')':'')+'</div>';
+  const max=niceMax(Math.max(1,...a.meses.map(m=>Math.max(m.rec,m.gas))));
+  h+='<div class="card"><h2>Mês a mês</h2><div class="rows">';
+  for(const m of a.meses){
+    if(!(m.rec||m.gas||m.gua))continue;
+    h+='<div class="row" data-act="goMes" data-ym="'+m.ym+'" style="cursor:pointer"><div class="main"><div class="t" style="text-transform:capitalize">'+esc(MESES[+m.ym.slice(5,7)-1])+'</div>'
+      +'<div class="track meta" style="margin:5px 0 2px"><div class="fill" style="width:'+Math.max(2,Math.round(m.gas/max*100))+'%;background:var(--viz-verm)"></div></div>'
+      +'<div class="d">entrou '+esc(fmt(m.rec))+' · gastou '+esc(fmt(m.gas))+(m.gua?' · guardou '+esc(fmt(m.gua)):'')+'</div></div>'
+      +'<span class="num '+(m.sob<0?"neg":"pos")+'">'+esc((m.sob>=0?"+":"−")+" "+fmt(Math.abs(m.sob)))+'</span></div>';
+  }
+  if(!a.nMeses)h+='<div class="empty">Nenhum lançamento em '+a.ano+'.</div>';
+  h+='</div></div>';
+  if(a.cats.length){
+    const cmax=a.cats[0][1]||1;
+    h+='<div class="card"><h2>Pra onde foi o dinheiro no ano</h2><div class="hbars">'
+      +a.cats.slice(0,10).map(([c,v])=>'<div class="hb" data-tip="'+esc(c+" · "+fmt(v)+" · "+pct(v/(a.gas||1))+" do gasto")+'"><div class="l">'+esc(c)+'</div>'
+        +'<div class="track"><div class="fill" style="width:'+Math.max(2,Math.round(v/cmax*100))+'%"></div></div><div class="v">'+esc(fmt(v))+'</div></div>').join('')
+      +'</div></div>';
+  }
+  return h;
+}
+function baixarAno(){
+  const was=S.hide;S.hide=false;let a,html;
+  try{
+    a=dadosAno(+S.mes.slice(0,4));
+    const lin=a.meses.filter(m=>m.rec||m.gas||m.gua).map(m=>'<tr><td style="text-transform:capitalize">'+esc(MESES[+m.ym.slice(5,7)-1])+'</td><td class="v">'+esc(fmt(m.rec))+'</td><td class="v">'+esc(fmt(m.gas))+'</td><td class="v">'+esc(fmt(m.gua))+'</td><td class="v">'+esc(fmt(m.sob))+'</td></tr>').join('');
+    const cats=a.cats.map(([c,v])=>'<tr><td>'+esc(c)+'</td><td class="v">'+esc(fmt(v))+'</td><td class="v">'+esc(pct(v/(a.gas||1)))+'</td></tr>').join('');
+    html='<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bolso — ano '+a.ano+'</title>'
+      +'<style>body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#171B2C}h1{font-size:21px}h2{font-size:15px;margin:22px 0 6px;border-bottom:2px solid #8B7CF8;padding-bottom:3px}table{width:100%;border-collapse:collapse;font-size:13.5px}td,th{padding:5px 6px;border-bottom:1px solid #E5E7F2;text-align:left}td.v,th.v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}p.meta{color:#767C97;font-size:12px}</style></head><body>'
+      +'<h1>Bolso · relatório de '+a.ano+'</h1><p class="meta">gerado em '+esc(dBR(todayISO()))+'</p>'
+      +'<h2>Resumo</h2><table><tr><td>Recebido</td><td class="v">'+esc(fmt(a.rec))+'</td></tr><tr><td>Gasto</td><td class="v">'+esc(fmt(a.gas))+'</td></tr><tr><td>Guardado</td><td class="v">'+esc(fmt(a.gua))+'</td></tr><tr><td><b>Sobrou</b></td><td class="v"><b>'+esc(fmt(a.sob))+'</b></td></tr>'
+      +(a.caro?'<tr><td>Mês mais caro</td><td class="v">'+esc(ymLabel(a.caro.ym))+' · '+esc(fmt(a.caro.gas))+'</td></tr>':'')+'</table>'
+      +'<h2>Mês a mês</h2><table><tr><th>Mês</th><th class="v">Recebido</th><th class="v">Gasto</th><th class="v">Guardado</th><th class="v">Sobrou</th></tr>'+lin+'</table>'
+      +(cats?'<h2>Gastos por categoria</h2><table><tr><th>Categoria</th><th class="v">Total</th><th class="v">%</th></tr>'+cats+'</table>':'')
+      +'</body></html>';
+  }finally{S.hide=was;}
+  const u=URL.createObjectURL(new Blob([html],{type:"text/html"}));
+  const el=document.createElement("a");el.href=u;el.download="bolso-ano-"+a.ano+".html";
+  document.body.appendChild(el);el.click();el.remove();setTimeout(()=>URL.revokeObjectURL(u),4000);
+  toast("Relatório do ano baixado ✓");
+}
 function vRelatorio(){
+  if(S.relAno)return vRelAno();
   const d=monthData(S.mes);
   const mesAnt=addMonths(S.mes,-1), dAnt=monthData(mesAnt), antL=ymShort(mesAnt);
   let h='<div class="card"><div class="cardhead"><h2>Relatório — '+esc(ymLabel(S.mes))+'</h2>'
     +'<span style="flex:1"></span>'
     +'<button class="btn mini" data-act="voltarResumo">← VOLTAR</button>'
+    +'<button class="btn mini" data-act="relAno">📅 ANO '+esc(S.mes.slice(0,4))+'</button>'
     +'<button class="btn mini" data-act="backup" title="Baixa todos os teus dados num arquivo">BACKUP</button>'
     +'<button class="btn mini" data-act="restaurar" title="Puxa os dados de volta de um arquivo de backup">RESTAURAR</button>'
     +'<button class="btn mini primary" data-act="dlRel">BAIXAR</button></div>'
@@ -2078,7 +2902,7 @@ window.addEventListener("offline",()=>toast("Sem internet — o que tu lançar a
 window.addEventListener("online",()=>{toast("Internet voltou ✓");if(sb&&USER&&!S.mem)loadAll();});
 
 function start(hot){
-  if(hot&&typeof hot.tab==="string"&&["resumo","rendas","despesas","corridas","inv","relatorio"].includes(hot.tab))S.tab=hot.tab;
+  if(hot&&typeof hot.tab==="string"&&["resumo","rendas","despesas","agenda","corridas","inv","relatorio"].includes(hot.tab))S.tab=hot.tab;
   if(hot&&validYM(hot.mes))S.mes=hot.mes;
   if(location.hash==="#gasto")S.tab="despesas";
   if(lsGet("bolso-haspin")==="1"&&ssGet("bolso-unlock")!=="1")showLock();
