@@ -7,7 +7,7 @@
 <link rel="manifest" href="manifest.webmanifest">
 <link rel="icon" href="icon-192.png" type="image/png">
 <link rel="apple-touch-icon" href="icon-192.png">
-<title>Julius</title>
+<title>Bolso</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;700&family=Bricolage+Grotesque:opsz,wght@12..96,500..800&family=IBM+Plex+Mono:wght@500;600;700&display=swap">
 <style>
 /* Layout: app shell escuro — glow roxo no topo, barra de abas fixa, cartões sobre navy profundo */
@@ -219,7 +219,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
 
 <div class="wrap">
   <div class="top">
-    <div class="brand">Julius<small>meu controle financeiro</small></div>
+    <div class="brand">Bolso<small>meu controle financeiro</small></div>
     <div class="mesnav">
       <button id="mprev" aria-label="Mês anterior">‹</button>
       <div class="meslabel num" id="meslabel">—</div>
@@ -247,7 +247,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
 <button class="fab" id="fab">+ GASTO</button>
 <div id="lock" hidden>
   <form class="box" novalidate>
-    <div class="lbrand">Julius</div>
+    <div class="lbrand">Bolso</div>
     <div class="lsub">meu controle financeiro</div>
     <input id="pin-in" type="password" inputmode="numeric" autocomplete="off" placeholder="PIN" aria-label="PIN">
     <div class="err" id="pin-err"></div>
@@ -257,7 +257,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
 </div>
 <div id="auth" hidden>
   <form class="box" novalidate>
-    <div class="lbrand">Julius</div>
+    <div class="lbrand">Bolso</div>
     <div class="lsub">meu controle financeiro</div>
     <input id="auth-email" type="email" autocomplete="email" placeholder="E-mail" aria-label="E-mail">
     <input id="auth-senha" type="password" autocomplete="current-password" placeholder="Senha" aria-label="Senha">
@@ -267,6 +267,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
       <button type="button" class="btn" id="btn-criar">CRIAR CONTA</button>
     </div>
     <div class="forgot">Primeira vez? Bota e-mail e senha (mínimo 6 caracteres) e clica em CRIAR CONTA.</div>
+    <div class="forgot"><a href="#" id="btn-esqueci" style="color:var(--roxo-ink)">Esqueci a senha</a></div>
   </form>
 </div>
 
@@ -332,7 +333,7 @@ const S={
   mes:ymNow(), tab:"resumo",
   fontes:[], fixas:[], lanc:[], inv:[], cartoes:[], cfg:{},
   db:null, mem:false, conectando:true, loaded:{},
-  hide:(()=>{try{return localStorage.getItem("julius-hide")==="1"}catch(_){return false}})(),
+  hide:(()=>{try{return localStorage.getItem("bolso-hide")==="1"}catch(_){return false}})(),
   locked:false, pendGasto:0, ano:+ymNow().slice(0,4)
 };
 /* ----- privacidade: olhinho + bloqueio por PIN ----- */
@@ -343,7 +344,7 @@ function lsSet(k,v){try{v==null?localStorage.removeItem(k):localStorage.setItem(
 function ssGet(k){try{return sessionStorage.getItem(k)}catch(_){return null}}
 function ssSet(k,v){try{sessionStorage.setItem(k,v)}catch(_){}}
 async function pinDigest(pin){
-  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("julius:"+pin));
+  const buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode("bolso:"+pin));
   return Array.from(new Uint8Array(buf)).map(x=>x.toString(16).padStart(2,"0")).join("");
 }
 function showLock(){S.locked=true;$("#lock").hidden=false;$("#pin-err").textContent="";const i=$("#pin-in");if(i){i.value="";setTimeout(()=>i.focus(),60);}}
@@ -352,7 +353,7 @@ async function tryUnlock(){
   const v=($("#pin-in").value||"").trim();
   if(!S.cfg.pinHash){$("#pin-err").textContent="Ainda conectando… tenta de novo";return;}
   let h="";try{h=await pinDigest(v)}catch(_){$("#pin-err").textContent="Não deu pra validar nesse navegador";return;}
-  if(h===S.cfg.pinHash){ssSet("julius-unlock","1");hideLock();}
+  if(h===S.cfg.pinHash){ssSet("bolso-unlock","1");hideLock();}
   else{$("#pin-err").textContent="PIN errado";$("#pin-in").value="";$("#pin-in").focus();}
 }
 function lockCfgDialog(){
@@ -366,7 +367,7 @@ function lockCfgDialog(){
       if(h!==S.cfg.pinHash){toast("PIN atual errado");return false;}
       const rest={...S.cfg};delete rest.pinHash;
       const ok=await cfgSetFull(rest);
-      if(ok){lsSet("julius-haspin",null);toast("Bloqueio removido ✓");}
+      if(ok){lsSet("bolso-haspin",null);toast("Bloqueio removido ✓");}
       return ok;
     }:null,
     fields:[
@@ -380,7 +381,7 @@ function lockCfgDialog(){
       if(tem){let h="";try{h=await pinDigest((v.atual||"").trim())}catch(_){ }if(h!==S.cfg.pinHash){toast("PIN atual errado");return false;}}
       let nh="";try{nh=await pinDigest(v.novo)}catch(_){toast("Esse navegador não deixou criar o PIN");return false;}
       const ok=await cfgSet({pinHash:nh});
-      if(ok){lsSet("julius-haspin","1");ssSet("julius-unlock","1");toast(tem?"PIN trocado ✓":"Bloqueio ativado ✓ — vai pedir o PIN na próxima vez que abrir");}
+      if(ok){lsSet("bolso-haspin","1");ssSet("bolso-unlock","1");toast(tem?"PIN trocado ✓":"Bloqueio ativado ✓ — vai pedir o PIN na próxima vez que abrir");}
       return ok;
     }
   });
@@ -439,15 +440,15 @@ function tipoLabel(f){
 }
 
 /* =========================== banco de dados (Supabase) =========================== */
-const SUPABASE_URL="https://xzhoryirgwygsfpwbhqh.supabase.co";   // ex: https://abcdefgh.supabase.co  (Settings → API)
-const SUPABASE_ANON_KEY="sb_publishable_4umbCusrDaVfo0F0hl3dgw_KZ9NeBLl"; // Settings → API → anon public
+const SUPABASE_URL="https://sqbynndotxjzugborjaz.supabase.co";   // ex: https://abcdefgh.supabase.co  (Settings → API)
+const SUPABASE_ANON_KEY="eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InNxYnlubmRvdHhqenVnYm9yamF6Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTEyODk3MjQsImV4cCI6MjEwNjg2NTcyNH0.3FqUGRqyrZi-nuljrU6Efo-3CugDfVJOD1bfXpwncVI"; // Settings → API → anon public
 let sb=null, USER=null;
 
 function rowOf(col,id){return S[col].find(x=>x.id===id)}
 async function dbSet(col,id,data){
   if(S.mem){const a=S[col],i=a.findIndex(x=>x.id===id),row={id,...data};i<0?a.push(row):a[i]=row;renderAll();return true;}
   if(!USER)return false;
-  const {error}=await sb.from("julius_docs").upsert({user_id:USER.id,col,doc_id:id,data,updated_at:new Date().toISOString()});
+  const {error}=await sb.from("bolso_docs").upsert({user_id:USER.id,col,doc_id:id,data,updated_at:new Date().toISOString()});
   if(error){toast("Não salvou: "+error.message);return false;}
   const a=S[col],i=a.findIndex(x=>x.id===id),row={id,...data};i<0?a.push(row):a[i]=row;
   renderAll();return true;
@@ -455,24 +456,24 @@ async function dbSet(col,id,data){
 async function dbDel(col,id){
   if(S.mem){S[col]=S[col].filter(x=>x.id!==id);renderAll();return true;}
   if(!USER)return false;
-  const {error}=await sb.from("julius_docs").delete().match({user_id:USER.id,col,doc_id:id});
+  const {error}=await sb.from("bolso_docs").delete().match({user_id:USER.id,col,doc_id:id});
   if(error){toast("Não consegui excluir — tenta de novo");return false;}
   S[col]=S[col].filter(x=>x.id!==id);renderAll();return true;
 }
 async function cfgSetFull(data){
   if(S.mem){S.cfg=data;renderAll();return true;}
   if(!USER)return false;
-  const {error}=await sb.from("julius_docs").upsert({user_id:USER.id,col:"config",doc_id:"geral",data,updated_at:new Date().toISOString()});
+  const {error}=await sb.from("bolso_docs").upsert({user_id:USER.id,col:"config",doc_id:"geral",data,updated_at:new Date().toISOString()});
   if(error){toast("Não salvou a configuração");return false;}
   S.cfg=data;aplicaLockCfg();renderAll();return true;
 }
 async function cfgSet(patch){return cfgSetFull({...S.cfg,...patch})}
 function aplicaLockCfg(){
-  if(S.cfg.pinHash){lsSet("julius-haspin","1");}
-  else{lsSet("julius-haspin",null);if(S.locked)hideLock();}
+  if(S.cfg.pinHash){lsSet("bolso-haspin","1");}
+  else{lsSet("bolso-haspin",null);if(S.locked)hideLock();}
 }
 async function loadAll(){
-  const {data,error}=await sb.from("julius_docs").select("col,doc_id,data");
+  const {data,error}=await sb.from("bolso_docs").select("col,doc_id,data");
   if(error){S.conectando=false;toast("Erro ao carregar: "+error.message);renderAll();return;}
   for(const c of COLS)S[c]=[];
   S.cfg={};
@@ -482,7 +483,7 @@ async function loadAll(){
   }
   S.conectando=false;
   aplicaLockCfg();
-  if(S.cfg.pinHash&&ssGet("julius-unlock")!=="1"&&!S.locked)showLock();
+  if(S.cfg.pinHash&&ssGet("bolso-unlock")!=="1"&&!S.locked)showLock();
   renderAll();
 }
 function authShow(){$("#auth").hidden=false;setTimeout(()=>{const i=$("#auth-email");if(i)i.focus();},60);}
@@ -503,15 +504,45 @@ async function entrar(criar){
   if(r.error){err.textContent=authErroTxt(r.error.message);return;}
   if(criar&&r.data&&r.data.user&&!r.data.session){err.textContent="Conta criada! Confirma no teu e-mail e depois clica em ENTRAR.";return;}
 }
+async function esqueciSenha(){
+  const email=($("#auth-email").value||"").trim();
+  const err=$("#auth-err");err.textContent="";
+  if(!email){err.textContent="Bota teu e-mail ali em cima e clica de novo em Esqueci a senha";$("#auth-email").focus();return;}
+  if(!sb){err.textContent="Ainda conectando… tenta de novo";return;}
+  const {error}=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
+  if(error){err.textContent=authErroTxt(error.message);return;}
+  err.textContent="Pronto! Te mandei um link no e-mail. Abre ele aqui neste aparelho pra criar a senha nova.";
+}
+function novaSenhaDialog(){
+  openForm({
+    title:"Criar senha nova",
+    sub:"Tu entrou pelo link do e-mail. Escolhe a senha nova (mínimo 6 caracteres).",
+    fields:[
+      {k:"s1",label:"Senha nova",type:"password",req:1,value:""},
+      {k:"s2",label:"Repete a senha",type:"password",req:1,value:""}
+    ],
+    saveLabel:"SALVAR SENHA",
+    save:async v=>{
+      if((v.s1||"").length<6){toast("A senha precisa de pelo menos 6 caracteres");return false;}
+      if(v.s1!==v.s2){toast("As duas senhas não bateram");return false;}
+      const {error}=await sb.auth.updateUser({password:v.s1});
+      if(error){toast(authErroTxt(error.message));return false;}
+      toast("Senha trocada ✓");
+      try{history.replaceState(null,"",location.pathname);}catch(_){}
+      return true;
+    }
+  });
+}
 async function sair(){
   try{await sb.auth.signOut();}catch(_){}
-  try{sessionStorage.removeItem("julius-unlock");}catch(_){}
+  try{sessionStorage.removeItem("bolso-unlock");}catch(_){}
 }
 async function connect(){
   if(typeof window.supabase==="undefined"){S.mem=true;S.cdnFail=true;S.conectando=false;if(S.locked)hideLock();renderBanner();renderAll();return;}
   if(!/^https:\/\/.+/.test(SUPABASE_URL)||SUPABASE_ANON_KEY.indexOf("COLE_AQUI")===0){S.mem=true;S.semConfig=true;S.conectando=false;if(S.locked)hideLock();renderBanner();renderAll();return;}
   sb=window.supabase.createClient(SUPABASE_URL,SUPABASE_ANON_KEY);
   sb.auth.onAuthStateChange((_ev,session)=>{
+    if(_ev==="PASSWORD_RECOVERY")setTimeout(()=>novaSenhaDialog(),300);
     if(session&&session.user){const novo=!USER||USER.id!==session.user.id;USER=session.user;authHide();if(novo)loadAll();}
     else{USER=null;for(const c of COLS)S[c]=[];S.cfg={};S.conectando=false;if(S.locked)hideLock();authShow();renderAll();}
   });
@@ -1055,6 +1086,7 @@ function wire(root){
       if(a==="relatorio"){S.tab="relatorio";renderAll();window.scrollTo(0,0);}
       if(a==="voltarResumo"){S.tab="resumo";renderAll();}
       if(a==="dlRel")baixarRel();
+      if(a==="backup")baixarBackup();
       if(a==="goInv"){S.tab="inv";renderAll();}
       if(a==="goRendas"){S.tab="rendas";renderAll();}
       if(a==="goDespesas"){S.tab="despesas";renderAll();}
@@ -1393,6 +1425,7 @@ function vRelatorio(){
   let h='<div class="card"><div class="cardhead"><h2>Relatório — '+esc(ymLabel(S.mes))+'</h2>'
     +'<span style="flex:1"></span>'
     +'<button class="btn mini" data-act="voltarResumo">← VOLTAR</button>'
+    +'<button class="btn mini" data-act="backup" title="Baixa todos os teus dados num arquivo">BACKUP</button>'
     +'<button class="btn mini primary" data-act="dlRel">BAIXAR</button></div>'
     +'<p class="sub" style="margin:6px 0 0">Gerado em '+esc(dBR(todayISO()))+' · navega nos meses ali em cima pra ver outros relatórios</p></div>';
   h+='<div class="tiles">'
@@ -1509,7 +1542,21 @@ function buildRelHTML(){
     }
     t+=row("<b>Total</b>","aplicado "+esc(fmt(invApl)),"<b>"+esc(fmt(invTot))+"</b>")+'</table>';
   }
-  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Julius — '+esc(ymLabel(S.mes))+'</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#171B2C;background:#fff}h1{font-size:21px}h2{font-size:15px;margin:22px 0 6px;border-bottom:2px solid #8B7CF8;padding-bottom:3px}h3{font-size:13px;margin:14px 0 4px;color:#454A63}table{width:100%;border-collapse:collapse;font-size:13.5px}td{padding:5px 6px;border-bottom:1px solid #E5E7F2;vertical-align:top}td.x{color:#767C97;font-size:12px}td.v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}p.meta{color:#767C97;font-size:12px}</style></head><body><h1>Julius · relatório de '+esc(ymLabel(S.mes))+'</h1><p class="meta">gerado em '+esc(dBR(todayISO()))+'</p>'+t+'</body></html>';
+  return '<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Bolso — '+esc(ymLabel(S.mes))+'</title><style>body{font-family:system-ui,-apple-system,sans-serif;max-width:720px;margin:24px auto;padding:0 16px;color:#171B2C;background:#fff}h1{font-size:21px}h2{font-size:15px;margin:22px 0 6px;border-bottom:2px solid #8B7CF8;padding-bottom:3px}h3{font-size:13px;margin:14px 0 4px;color:#454A63}table{width:100%;border-collapse:collapse;font-size:13.5px}td{padding:5px 6px;border-bottom:1px solid #E5E7F2;vertical-align:top}td.x{color:#767C97;font-size:12px}td.v{text-align:right;white-space:nowrap;font-variant-numeric:tabular-nums}p.meta{color:#767C97;font-size:12px}</style></head><body><h1>Bolso · relatório de '+esc(ymLabel(S.mes))+'</h1><p class="meta">gerado em '+esc(dBR(todayISO()))+'</p>'+t+'</body></html>';
+}
+function baixarBackup(){
+  const {pinHash,...cfgSemPin}=S.cfg||{};          // o PIN não vai pro arquivo
+  const dados={app:"bolso",versao:1,geradoEm:new Date().toISOString(),
+    conta:USER?USER.email:null,cfg:cfgSemPin};
+  let total=0;
+  for(const c of COLS){dados[c]=S[c].map(x=>({...x}));total+=S[c].length;}
+  const blob=new Blob([JSON.stringify(dados,null,2)],{type:"application/json"});
+  const u=URL.createObjectURL(blob);
+  const a=document.createElement("a");
+  a.href=u;a.download="bolso-backup-"+todayISO()+".json";
+  document.body.appendChild(a);a.click();a.remove();
+  setTimeout(()=>URL.revokeObjectURL(u),4000);
+  toast("Backup baixado ✓ ("+total+" registros) — guarda num lugar seguro");
 }
 async function baixarRel(){
   const was=S.hide;S.hide=false;let html;
@@ -1517,7 +1564,7 @@ async function baixarRel(){
   const blob=new Blob([html],{type:"text/html"});
   const u=URL.createObjectURL(blob);
   const a=document.createElement("a");
-  a.href=u;a.download="julius-relatorio-"+S.mes+".html";
+  a.href=u;a.download="bolso-relatorio-"+S.mes+".html";
   document.body.appendChild(a);a.click();a.remove();
   setTimeout(()=>URL.revokeObjectURL(u),4000);
   toast("Relatório baixado ✓ (abre no navegador e imprime se quiser)");
@@ -1547,18 +1594,26 @@ $("#mprev").onclick=()=>{S.mes=addMonths(S.mes,-1);renderAll();};
 $("#mnext").onclick=()=>{S.mes=addMonths(S.mes,1);renderAll();};
 $("#mhoje").onclick=()=>{S.mes=ymNow();renderAll();};
 $("#fab").onclick=()=>gastoDialog();
-$("#eye").onclick=()=>{S.hide=!S.hide;lsSet("julius-hide",S.hide?"1":null);renderAll();};
+$("#eye").onclick=()=>{S.hide=!S.hide;lsSet("bolso-hide",S.hide?"1":null);renderAll();};
 $("#lockbtn").onclick=()=>lockCfgDialog();
 document.querySelector("#lock form").addEventListener("submit",e=>{e.preventDefault();tryUnlock();});
 document.querySelector("#auth form").addEventListener("submit",e=>{e.preventDefault();entrar(false);});
 $("#btn-criar").onclick=()=>entrar(true);
+$("#btn-esqueci").onclick=e=>{e.preventDefault();esqueciSenha();};
 $("#btn-sair").onclick=()=>sair();
+
+/* offline: guarda o app no aparelho e avisa quando a conexão cai/volta */
+if("serviceWorker" in navigator&&location.protocol==="https:"){
+  window.addEventListener("load",()=>{navigator.serviceWorker.register("sw.js").catch(()=>{});});
+}
+window.addEventListener("offline",()=>toast("Sem internet — o que tu lançar agora pode não salvar"));
+window.addEventListener("online",()=>{toast("Internet voltou ✓");if(sb&&USER&&!S.mem)loadAll();});
 
 function start(hot){
   if(hot&&typeof hot.tab==="string"&&["resumo","rendas","despesas","inv","relatorio"].includes(hot.tab))S.tab=hot.tab;
   if(hot&&validYM(hot.mes))S.mes=hot.mes;
   if(location.hash==="#gasto")S.tab="despesas";
-  if(lsGet("julius-haspin")==="1"&&ssGet("julius-unlock")!=="1")showLock();
+  if(lsGet("bolso-haspin")==="1"&&ssGet("bolso-unlock")!=="1")showLock();
   renderAll();
   connect();
   if(location.hash==="#gasto")setTimeout(()=>{if(S.locked)S.pendGasto=1;else gastoDialog();},120);
