@@ -3,7 +3,7 @@
    - Página (index): tenta a internet primeiro; sem rede, usa a cópia guardada.
    - Fontes, ícones e bibliotecas: usa a cópia guardada (mais rápido).
    - Banco de dados (Supabase): NUNCA guarda — sempre vai direto na internet. */
-const VERSAO = "bolso-v1";
+const VERSAO = "bolso-v3";
 const BASE = ["./", "index.html", "manifest.webmanifest", "icon-192.png", "icon-512.png"];
 
 self.addEventListener("install", e => {

@@ -87,6 +87,7 @@ button{font:inherit;color:inherit;background:none;border:none;cursor:pointer;pad
 .banner{display:flex;flex-wrap:wrap;align-items:center;gap:8px 14px;background:linear-gradient(90deg,rgba(139,124,248,.16),rgba(78,140,255,.10));
   border:1px solid var(--line);border-radius:var(--r);padding:10px 14px;margin:10px 0 2px;font-size:13.5px;color:var(--ink-2)}
 .banner b{color:var(--ink)}
+.banner b.warntx{color:var(--warn)}.banner b.neg{color:var(--neg)}.banner b.pos{color:var(--pos)}
 .banner .act{margin-left:auto;font-weight:700;font-size:12px;letter-spacing:.06em;color:var(--roxo-ink)}
 
 /* ---------- cartões ---------- */
@@ -161,6 +162,21 @@ label.fl{display:block;font-size:11px;font-weight:700;letter-spacing:.1em;color:
 .hb .track{height:14px;border-radius:5px;background:var(--surface-2);overflow:hidden}
 .hb .fill{height:100%;border-radius:5px 0 0 5px;background:var(--azul);min-width:2px}
 .hb .v{font-size:12px;color:var(--ink-2);font-family:var(--f-num);font-variant-numeric:tabular-nums}
+/* teto por categoria: a barra muda de cor conforme enche */
+.hbars.teto{gap:4px}
+.hbars.teto .hb{margin-top:8px}
+.hbars.teto .fill.pos{background:var(--viz-verde)}
+.hbars.teto .fill.warntx{background:var(--warn)}
+.hbars.teto .fill.neg{background:var(--viz-verm)}
+.hbars.teto .v.pos{color:var(--pos)}.hbars.teto .v.warntx{color:var(--warn)}.hbars.teto .v.neg{color:var(--neg)}
+.tetod{font-size:11.5px;color:var(--ink-3);padding-left:calc(min(118px,30%) + 10px)}
+/* barra de progresso das metas */
+.track.meta{height:8px;border-radius:999px;background:var(--surface-2);overflow:hidden;margin:7px 0 5px}
+.track.meta .fill{height:100%;border-radius:999px;background:var(--roxo)}
+.track.meta .fill.pos{background:var(--viz-verde)}
+/* cartão de contas vencendo */
+.card.alerta{border-color:rgba(242,194,102,.55);background:linear-gradient(160deg,rgba(242,194,102,.12),var(--surface) 60%)}
+.card.alerta.ruim{border-color:rgba(230,103,103,.6);background:linear-gradient(160deg,rgba(230,103,103,.14),var(--surface) 60%)}
 
 /* ---------- dialog ---------- */
 dialog{background:var(--surface);color:var(--ink);border:1px solid var(--line);border-radius:16px;
@@ -234,6 +250,7 @@ dialog::backdrop{background:rgba(5,7,18,.72);backdrop-filter:blur(3px)}
     <button class="tab" role="tab" data-tab="resumo">RESUMO</button>
     <button class="tab" role="tab" data-tab="rendas">RENDAS</button>
     <button class="tab" role="tab" data-tab="despesas">DESPESAS</button>
+    <button class="tab" role="tab" data-tab="corridas">🚗 CORRIDAS</button>
     <button class="tab" role="tab" data-tab="inv">INVESTIMENTOS</button>
   </nav>
   <div id="banner"></div>
@@ -323,15 +340,20 @@ function niceMax(v){if(!(v>0))return 100;const p=Math.pow(10,Math.floor(Math.log
 function toast(msg){const t=$("#toast");t.textContent=msg;t.classList.add("show");clearTimeout(toast._h);toast._h=setTimeout(()=>t.classList.remove("show"),2600)}
 
 /* ============================== estado ============================== */
-const CAT_RENDA=["Salário","Adicional","Aluguel","Auxílio","Bônus","13º","Extra","Outros"];
-const CAT_DESP=["Casa","Carro","Saúde","Mercado","Alimentação fora","Transporte","Lazer","Viagens","Educação","Assinaturas","Planos","Família","Outros"];
+const CAT_RENDA=["Salário","Adicional","Aluguel","Auxílio","Bônus","13º","Extra","Corridas","Outros"];
+const CAT_DESP=["Casa","Carro","Corridas","Saúde","Mercado","Alimentação fora","Transporte","Lazer","Viagens","Educação","Assinaturas","Planos","Família","Outros"];
 const TIPOS_INV=["CDB","LCI/LCA","Tesouro Direto","Poupança","Fundo","Ações/FIIs","Cripto","Outro"];
 const FORMAS=[["pix","Pix"],["dinheiro","Dinheiro"],["debito","Débito"],["vexpenses","VExpenses"],["credito","Cartão de crédito"]];
 function formaLabel(f){return ({pix:"Pix",dinheiro:"Dinheiro",debito:"Débito",vexpenses:"VExpenses",credito:"Crédito"})[f]||f}
-const COLS=["fontes","fixas","lanc","inv","cartoes"];
+const COLS=["fontes","fixas","lanc","inv","cartoes","metas","corridas"];
+/* categorias: as padrão + as que o usuário criou (ficam na configuração) */
+function extrasCat(k){return (Array.isArray(S.cfg[k])?S.cfg[k]:[]).filter(c=>c&&typeof c==="string")}
+function juntaCat(base,extras){const sem=base.filter(c=>c!=="Outros");const out=[...sem];for(const e of extras)if(!out.includes(e))out.push(e);out.push("Outros");return out}
+function catDesp(){return juntaCat(CAT_DESP,extrasCat("catDespExtra"))}
+function catRenda(){return juntaCat(CAT_RENDA,extrasCat("catRendaExtra"))}
 const S={
   mes:ymNow(), tab:"resumo",
-  fontes:[], fixas:[], lanc:[], inv:[], cartoes:[], cfg:{},
+  fontes:[], fixas:[], lanc:[], inv:[], cartoes:[], metas:[], corridas:[], cfg:{}, busca:"", buscaPer:"ano",
   db:null, mem:false, conectando:true, loaded:{},
   hide:(()=>{try{return localStorage.getItem("bolso-hide")==="1"}catch(_){return false}})(),
   locked:false, pendGasto:0, ano:+ymNow().slice(0,4)
@@ -430,6 +452,123 @@ function monthData(mes){
     faturaCartao,comprasNovas,comprasNovasTot,futuras,futuroPrev,
     saldo:round2(rendReal-gasto-guard)};
 }
+/* ---------- 1) contas vencendo (sempre pelo mês de HOJE) ---------- */
+function vencimentos(janela){
+  janela=janela==null?5:janela;
+  const hojeISO=todayISO(), mes=hojeISO.slice(0,7), d=monthData(mes);
+  const diaHoje=+hojeISO.slice(8,10);
+  const ultimo=new Date(+mes.slice(0,4),+mes.slice(5,7),0).getDate();
+  const out=[];
+  for(const x of d.fixas){
+    if(d.pagByRef[x.id]||!x.diaVenc)continue;
+    const dia=Math.min(+x.diaVenc,ultimo);
+    const falta=dia-diaHoje;
+    if(falta>janela)continue;
+    const extra=x.ehCartao?sum(d.faturaCartao.map(q=>q.valor)):0;
+    out.push({id:x.id,tipo:"fixa",nome:x.nome,valor:round2((+x.valor||0)+extra),falta});
+  }
+  for(const l of S.lanc){
+    if(l.tipo!=="futura"||!l.data)continue;
+    const falta=Math.round((new Date(l.data+"T12:00:00")-new Date(hojeISO+"T12:00:00"))/864e5);
+    if(falta>janela)continue;
+    out.push({id:l.id,tipo:"futura",nome:l.desc||"Planejada",valor:+l.valor||0,falta});
+  }
+  return out.sort((a,b)=>a.falta-b.falta);
+}
+function quandoTxt(f){
+  if(f<-1)return "venceu há "+(-f)+" dias";
+  if(f===-1)return "venceu ontem";
+  if(f===0)return "vence HOJE";
+  if(f===1)return "vence amanhã";
+  return "vence em "+f+" dias";
+}
+
+/* ---------- 2) teto por categoria ---------- */
+function gastoPorCat(mes){
+  const d=monthData(mes), cartaoFixa=new Set(S.fixas.filter(x=>x.ehCartao).map(x=>x.id));
+  const by={};
+  for(const l of d.lan){
+    let entra=false;
+    if(l.tipo==="avulsa"||l.tipo==="cartao")entra=true;
+    /* a fatura paga não conta de novo: as compras dela já entram pela categoria de cada uma */
+    else if(l.tipo==="fixa")entra=!(l.refId&&cartaoFixa.has(l.refId));
+    if(entra){const c=l.cat||"Outros";by[c]=round2((by[c]||0)+(+l.valor||0));}
+  }
+  return by;
+}
+function tetos(){const t=S.cfg.tetos;return t&&typeof t==="object"?t:{}}
+function statusTetos(mes){
+  const t=tetos(), g=gastoPorCat(mes);
+  return Object.keys(t).filter(c=>+t[c]>0).map(c=>{
+    const teto=+t[c], gasto=g[c]||0, p=gasto/teto;
+    return {cat:c,teto,gasto,p,cls:p>=1?"neg":p>=0.8?"warntx":"pos"};
+  }).sort((a,b)=>b.p-a.p);
+}
+function avisaTeto(cat,mes){
+  const s=statusTetos(mes).find(x=>x.cat===cat);
+  if(!s)return;
+  if(s.p>=1)setTimeout(()=>toast("⚠️ "+cat+" passou do teto: "+fmt(s.gasto)+" de "+fmt(s.teto)),2700);
+  else if(s.p>=0.8)setTimeout(()=>toast("Atenção: "+cat+" já está em "+Math.round(s.p*100)+"% do teto"),2700);
+}
+
+/* ---------- 3) metas ---------- */
+function metaGuardado(m){
+  return round2((+m.inicial||0)+sum(S.lanc.filter(l=>l.metaId===m.id).map(l=>l.valor)));
+}
+function metaInfo(m){
+  const tem=metaGuardado(m), alvo=+m.alvo||0, falta=Math.max(0,round2(alvo-tem));
+  const p=alvo>0?Math.min(1,tem/alvo):0;
+  let porMes=null, meses=null;
+  if(validYM(m.prazo)){meses=diffM(ymNow(),m.prazo)+1;if(meses>0&&falta>0)porMes=round2(falta/meses);}
+  return {tem,alvo,falta,p,porMes,meses};
+}
+
+/* ---------- corridas (Uber, 99...) ---------- */
+const APPS_CORRIDA=["Uber","99","inDrive","Particular","Outro"];
+function corridaCusto(c){return round2((+c.combustivel||0)+(+c.outros||0))}
+function corridaLucro(c){return round2((+c.bruto||0)-corridaCusto(c))}
+function corridasDoMes(mes){return S.corridas.filter(c=>(c.data||"").slice(0,7)===mes).sort((a,b)=>(b.data||"").localeCompare(a.data||""))}
+function resumoCorridas(lista){
+  const bruto=sum(lista.map(c=>c.bruto)), custo=sum(lista.map(corridaCusto));
+  const horas=round2(lista.reduce((t,c)=>t+(+c.horas||0),0)), km=round2(lista.reduce((t,c)=>t+(+c.km||0),0));
+  const lucro=round2(bruto-custo), desg=+S.cfg.desgasteKm||0;
+  const real=round2(lucro-km*desg);
+  return {dias:lista.length,bruto,custo,lucro,horas,km,
+    porHora:horas>0?round2(lucro/horas):null, porKm:km>0?round2(bruto/km):null,
+    custoKm:km>0?round2(custo/km):null, desg, real, realHora:horas>0?round2(real/horas):null};
+}
+const DIAS_SEM=["domingo","segunda","terça","quarta","quinta","sexta","sábado"];
+function melhoresDias(){
+  const by={};
+  for(const c of S.corridas){
+    if(!c.data||!(+c.horas>0))continue;
+    const w=new Date(c.data+"T12:00:00").getDay();
+    const b=by[w]||(by[w]={lucro:0,horas:0,n:0});
+    b.lucro+=corridaLucro(c);b.horas+=+c.horas;b.n++;
+  }
+  return Object.keys(by).map(w=>({dia:DIAS_SEM[w],porHora:round2(by[w].lucro/by[w].horas),n:by[w].n}))
+    .sort((a,b)=>b.porHora-a.porHora);
+}
+
+/* ---------- 5) busca ---------- */
+function semAcento(s){return String(s||"").normalize("NFD").replace(/[\u0300-\u036f]/g,"").toLowerCase()}
+function buscarLanc(termo,per){
+  const t=semAcento(termo).trim();
+  if(t.length<2)return null;
+  const hoje=ymNow(), ano=hoje.slice(0,4);
+  const lim12=addMonths(hoje,-11);
+  const partes=t.split(/\s+/);
+  const achou=S.lanc.filter(l=>{
+    if(!["avulsa","fixa","cartao","futura"].includes(l.tipo))return false;
+    const m=l.mes||"";
+    if(per==="ano"&&m.slice(0,4)!==ano)return false;
+    if(per==="12m"&&(m<lim12||m>hoje))return false;
+    const alvo=semAcento([l.desc,l.obs,l.cat,cartaoNome(l.cartaoId)].join(" "));
+    return partes.every(p=>alvo.includes(p));
+  }).sort((a,b)=>(b.data||b.mes||"").localeCompare(a.data||a.mes||""));
+  return {itens:achou,total:sum(achou.filter(l=>l.tipo!=="futura").map(l=>l.valor))};
+}
+
 function tipoLabel(f){
   const t=f.tipo||"mensal";
   if(t==="mensal")return "Mensal";
@@ -657,7 +796,7 @@ function addFonte(fo){
     del:fo?()=>dbDel("fontes",fo.id):null,
     fields:[
       {k:"nome",label:"Nome",type:"text",req:1,value:f.nome,ph:"ex: Salário"},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_RENDA,value:f.cat||"Salário"},
+      {k:"cat",label:"Categoria",type:"select",opts:catRenda(),value:f.cat||"Salário"},
       {k:"tipo",label:"Quando cai",type:"select",reactive:1,value:f.tipo||"mensal",
         opts:[["mensal","Todo mês"],["intervalo","De tempos em tempos (ex: bônus a cada 3 meses)"],["anual","Uma vez por ano (ex: 13º)"],["unica","Só uma vez"]]},
       {k:"valor",label:"Valor previsto (R$)",type:"money",req:1,value:f.valor!=null?String(f.valor).replace(".",","):"",ph:"ex: 5.000,00",
@@ -692,7 +831,7 @@ function addFixa(xo){
     del:xo?()=>dbDel("fixas",xo.id):null,
     fields:[
       {k:"nome",label:"Nome",type:"text",req:1,value:x.nome,ph:"ex: Prestação do carro"},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_DESP,value:x.cat||"Carro"},
+      {k:"cat",label:"Categoria",type:"select",opts:catDesp(),value:x.cat||"Carro"},
       {k:"valor",label:"Valor mensal (R$)",type:"money",req:1,value:x.valor!=null?String(x.valor).replace(".",","):"",ph:"ex: 1.450,00"},
       {k:"diaVenc",label:"Dia do vencimento",type:"number",value:x.diaVenc??"",ph:"ex: 10"},
       {k:"fimMes",label:"Última parcela",type:"month",value:x.fimMes||"",hint:"Ex: prestação que acaba em 2028-06. Deixa vazio se não tem fim."},
@@ -731,7 +870,7 @@ function rendaExtra(lanAtual){
     del:lanAtual?()=>dbDel("lanc",lanAtual.id):null,
     fields:[
       {k:"desc",label:"Descrição",type:"text",req:1,value:lanAtual&&lanAtual.desc,ph:"ex: Freela, venda…"},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_RENDA,value:(lanAtual&&lanAtual.cat)||"Extra"},
+      {k:"cat",label:"Categoria",type:"select",opts:catRenda(),value:(lanAtual&&lanAtual.cat)||"Extra"},
       {k:"valor",label:"Valor (R$)",type:"money",req:1,value:lanAtual?String(lanAtual.valor).replace(".",","):""},
       {k:"data",label:"Data",type:"date",req:1,value:lanAtual?lanAtual.data:todayISO()},
     ],
@@ -764,7 +903,7 @@ function editAvulsa(l){
     del:()=>dbDel("lanc",l.id),
     fields:[
       {k:"desc",label:"Descrição",type:"text",req:1,value:l.desc},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_DESP,value:l.cat||"Outros"},
+      {k:"cat",label:"Categoria",type:"select",opts:catDesp(),value:l.cat||"Outros"},
       {k:"valor",label:"Valor (R$)",type:"money",req:1,value:String(l.valor).replace(".",",")},
       {k:"forma",label:"Forma de pagamento",type:"select",opts:FORMAS.filter(f=>f[0]!=="credito"),value:l.forma||"pix"},
       {k:"obs",label:"Observação",type:"text",value:l.obs},
@@ -798,6 +937,7 @@ async function addGasto(v){
       m=addMonths(m,1);
     }
     toast(n>1?"Lançado — "+n+"x a partir da fatura de "+ymShort(fm)+" ✓":"Lançado na fatura de "+ymShort(fm)+" ✓");
+    avisaTeto(v.cat,fm);
     return true;
   }
   const fut=data>todayISO();
@@ -805,6 +945,7 @@ async function addGasto(v){
   if(v.obs)doc.obs=v.obs;
   const ok=await dbSet("lanc",uid(),doc);
   if(ok)toast(fut?"Planejada pra "+ymShort(data.slice(0,7))+" ✓ — entrou no previsto do mês":"Gasto lançado ✓");
+  if(ok&&!fut)avisaTeto(v.cat,data.slice(0,7));
   return ok;
 }
 function pagarFutura(l){
@@ -842,7 +983,7 @@ function gastoDialog(){
     fields:[
       {k:"valor",label:"Valor (R$)",type:"money",req:1,ph:"0,00"},
       {k:"desc",label:"Descrição",type:"text",req:1,ph:"ex: mercado"},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_DESP,value:"Mercado"},
+      {k:"cat",label:"Categoria",type:"select",opts:catDesp(),value:"Mercado"},
       {k:"forma",label:"Forma de pagamento",type:"select",reactive:1,opts:FORMAS,value:"pix"},
       {k:"cartaoId",label:"Cartão",type:"select",reactive:1,value:c0?c0.id:"",
         opts:cs.map(c=>[c.id,c.nome+" (fecha dia "+c.diaFecha+")"]).concat([["","Outro — escolher o mês na mão"]]),
@@ -866,7 +1007,7 @@ function editCartao(l){
     del:async()=>{for(const g of grupo){await dbDel("lanc",g.id);}return true;},
     fields:[
       {k:"desc",label:"Descrição",type:"text",req:1,value:l.desc},
-      {k:"cat",label:"Categoria",type:"select",opts:CAT_DESP,value:l.cat||"Outros"},
+      {k:"cat",label:"Categoria",type:"select",opts:catDesp(),value:l.cat||"Outros"},
       {k:"valor",label:"Valor desta parcela (R$)",type:"money",req:1,value:String(l.valor).replace(".",",")},
       {k:"obs",label:"Observação",type:"text",value:l.obs},
     ],
@@ -989,6 +1130,184 @@ function editCdi(){
     save:v=>cfgSet({cdi:v.cdi})
   });
 }
+/* ---------- 2) definir tetos ---------- */
+function editTetos(){
+  const t=tetos();
+  const cats=catDesp();
+  openForm({
+    title:"Teto por categoria",
+    sub:"Quanto tu quer gastar no máximo por mês em cada categoria. Deixa vazio as que não quer controlar. Eu aviso quando chegar em 80% e quando passar.",
+    fields:cats.map((c,i)=>({k:"t"+i,label:c,type:"money",value:t[c]!=null?String(t[c]).replace(".",","):"",ph:"sem teto"})),
+    save:v=>{
+      const novo={};
+      cats.forEach((c,i)=>{if(v["t"+i]>0)novo[c]=v["t"+i];});
+      toast(Object.keys(novo).length?"Tetos salvos ✓":"Tetos removidos");
+      return cfgSet({tetos:novo});
+    }
+  });
+}
+
+/* ---------- 6) categorias próprias ---------- */
+function editCategorias(){
+  openForm({
+    title:"Minhas categorias",
+    sub:"Cria as tuas além das que já vêm no app. Separa por vírgula.",
+    fields:[
+      {k:"desp",label:"Categorias de gasto",type:"text",value:extrasCat("catDespExtra").join(", "),ph:"ex: Pet, Academia, Filhos",
+        hint:"Já vêm: "+CAT_DESP.join(", ")},
+      {k:"renda",label:"Categorias de renda",type:"text",value:extrasCat("catRendaExtra").join(", "),ph:"ex: Freela, Venda",
+        hint:"Já vêm: "+CAT_RENDA.join(", ")}
+    ],
+    save:v=>{
+      const lista=(s,base)=>{const out=[];for(const p of String(s||"").split(",")){
+        const c=p.trim().replace(/\s+/g," ").slice(0,30);
+        if(c&&!base.some(b=>b.toLowerCase()===c.toLowerCase())&&!out.some(o=>o.toLowerCase()===c.toLowerCase()))out.push(c);}
+        return out;};
+      toast("Categorias salvas ✓");
+      return cfgSet({catDespExtra:lista(v.desp,CAT_DESP),catRendaExtra:lista(v.renda,CAT_RENDA)});
+    }
+  });
+}
+
+/* ---------- 3) metas ---------- */
+function addMeta(mo){
+  const m=mo||{};
+  openForm({
+    title:mo?"Editar meta":"Nova meta",
+    sub:"Pra que tu está juntando dinheiro? Eu calculo quanto guardar por mês.",
+    fields:[
+      {k:"nome",label:"Nome da meta",type:"text",req:1,value:m.nome||"",ph:"ex: Viagem, Reserva de emergência, Carro"},
+      {k:"alvo",label:"Quanto quer juntar (R$)",type:"money",req:1,value:m.alvo!=null?String(m.alvo).replace(".",","):"",ph:"ex: 5.000,00"},
+      {k:"prazo",label:"Até quando",type:"month",value:m.prazo||"",hint:"Ex: 2026-12. Deixa vazio se não tem prazo."},
+      {k:"inicial",label:"Já tem guardado pra ela (R$)",type:"money",value:m.inicial!=null?String(m.inicial).replace(".",","):"",ph:"0,00"}
+    ],
+    del:mo?()=>dbDel("metas",mo.id):null,
+    save:v=>dbSet("metas",m.id||uid(),{nome:v.nome,alvo:v.alvo,prazo:v.prazo||null,inicial:v.inicial||0,criadaEm:m.criadaEm||todayISO()})
+  });
+}
+function guardarMeta(m){
+  const info=metaInfo(m);
+  openForm({
+    title:"Guardar — "+m.nome,
+    sub:"Faltam "+fmt(info.falta)+(info.porMes?" · o ideal é "+fmt(info.porMes)+" por mês":""),
+    saveLabel:"GUARDAR",
+    fields:[
+      {k:"valor",label:"Valor (R$)",type:"money",req:1,value:info.porMes?String(info.porMes).replace(".",","):"",ph:"ex: 300,00"},
+      {k:"data",label:"Data",type:"date",req:1,value:todayISO()},
+      {k:"guardar",label:"Contar como GUARDADO no resumo do mês",type:"check",value:true}
+    ],
+    save:async v=>{
+      const ok=await dbSet("lanc",uid(),{mes:v.data.slice(0,7),tipo:v.guardar?"aporte":"meta",metaId:m.id,
+        desc:"Meta — "+m.nome,cat:"Meta",valor:v.valor,data:v.data});
+      if(ok){
+        const novo=metaInfo(m);
+        toast(novo.falta<=0?"🎉 Meta "+m.nome+" batida!":"Guardado ✓ — faltam "+fmt(novo.falta));
+      }
+      return ok;
+    }
+  });
+}
+
+/* ---------- corridas: lançar um dia ---------- */
+function addCorrida(co){
+  const c=co||{};
+  const vv=x=>x!=null&&x!==""?String(x).replace(".",","):"";
+  openForm({
+    title:co?"Editar dia de corrida":"Lançar dia de corrida",
+    sub:"O que o app pagou entra como RECEBIDO e o combustível como GASTO do mês, sozinhos.",
+    saveLabel:co?"SALVAR":"LANÇAR",
+    fields:[
+      {k:"data",label:"Dia",type:"date",req:1,value:c.data||todayISO()},
+      {k:"app",label:"App",type:"select",opts:APPS_CORRIDA,value:c.app||"Uber"},
+      {k:"bruto",label:"Quanto o app pagou (R$)",type:"money",req:1,value:vv(c.bruto),ph:"ex: 320,50",
+        hint:"O total do dia que aparece no app, já com as gorjetas."},
+      {k:"corridas",label:"Quantas corridas",type:"number",value:vv(c.corridas),ph:"ex: 14"},
+      {k:"horas",label:"Horas rodando",type:"number",value:vv(c.horas),ph:"ex: 8,5",hint:"Pode ser quebrado: 8,5 = 8h30."},
+      {k:"km",label:"Km rodados no dia",type:"number",value:vv(c.km),ph:"ex: 180"},
+      {k:"combustivel",label:"Combustível (R$)",type:"money",value:vv(c.combustivel),ph:"ex: 90,00"},
+      {k:"outros",label:"Outros custos do dia (R$)",type:"money",value:vv(c.outros),ph:"lavagem, pedágio, lanche…"},
+      {k:"obs",label:"Observação",type:"text",value:c.obs||"",ph:"ex: chuva, evento no Maracanã"}
+    ],
+    del:co?async()=>{
+      await dbDel("lanc","cr-"+co.id+"-r").catch(()=>{});
+      await dbDel("lanc","cr-"+co.id+"-c").catch(()=>{});
+      return dbDel("corridas",co.id);
+    }:null,
+    save:async v=>{
+      const id=c.id||uid();
+      const doc={data:v.data,app:v.app,bruto:v.bruto,corridas:v.corridas||null,horas:v.horas||null,km:v.km||null,
+        combustivel:v.combustivel||0,outros:v.outros||0,obs:v.obs||null};
+      const ok=await dbSet("corridas",id,doc);
+      if(!ok)return false;
+      const mes=v.data.slice(0,7), nome=v.app+" "+dShort(v.data);
+      /* renda e custo do dia viram lançamentos normais: entram no resumo, gráficos, tetos e busca */
+      await dbSet("lanc","cr-"+id+"-r",{mes,tipo:"renda",desc:"Corridas "+nome,cat:"Corridas",valor:v.bruto,data:v.data,corridaId:id});
+      const custo=round2((v.combustivel||0)+(v.outros||0));
+      if(custo>0)await dbSet("lanc","cr-"+id+"-c",{mes,tipo:"avulsa",desc:"Custos corrida "+nome,cat:"Corridas",valor:custo,data:v.data,forma:"pix",corridaId:id});
+      else if(rowOf("lanc","cr-"+id+"-c"))await dbDel("lanc","cr-"+id+"-c");
+      const lucro=round2(v.bruto-custo);
+      toast("Lançado ✓ — lucro do dia "+fmt(lucro)+(v.horas>0?" · "+fmt(lucro/v.horas)+"/hora":""));
+      if(custo>0)avisaTeto("Corridas",mes);
+      return true;
+    }
+  });
+}
+function editDesgaste(){
+  openForm({
+    title:"Desgaste do carro",
+    sub:"Quanto o carro gasta por km além do combustível: pneu, óleo, revisão, peças. Serve pra mostrar o teu lucro REAL.",
+    fields:[{k:"desg",label:"Desgaste por km (R$)",type:"money",value:S.cfg.desgasteKm?String(S.cfg.desgasteKm).replace(".",","):"",ph:"ex: 0,25",
+      hint:"Não sabe? R$ 0,20 a R$ 0,35 por km é comum em carro popular. Deixa vazio pra não usar."}],
+    save:v=>cfgSet({desgasteKm:v.desg||0})
+  });
+}
+
+/* ---------- 4) restaurar backup ---------- */
+function restaurarBackup(){
+  const inp=document.createElement("input");
+  inp.type="file";inp.accept=".json,application/json";
+  inp.onchange=async()=>{
+    const f=inp.files&&inp.files[0];if(!f)return;
+    let dados;
+    try{dados=JSON.parse(await f.text());}catch(_){toast("Esse arquivo não é um backup válido");return;}
+    if(!dados||(dados.app!=="bolso"&&dados.app!=="julius")){toast("Esse arquivo não é um backup do Bolso");return;}
+    const linhas=[];
+    for(const c of COLS)for(const x of (Array.isArray(dados[c])?dados[c]:[])){
+      if(!x||!x.id)continue;
+      const {id,...resto}=x;linhas.push({col:c,doc_id:String(id),data:resto});
+    }
+    const quando=dados.geradoEm?dBR(String(dados.geradoEm).slice(0,10)):"data desconhecida";
+    openForm({
+      title:"Restaurar backup",
+      sub:"Backup de "+quando+" com "+linhas.length+" registro(s). O que tiver o mesmo código é substituído pelo do arquivo; nada é apagado.",
+      saveLabel:"RESTAURAR",
+      fields:[{k:"cfg",label:"Restaurar também as configurações (CDI, tetos, categorias)",type:"check",value:true}],
+      save:async v=>{
+        if(S.mem){
+          for(const r of linhas){const a=S[r.col],i=a.findIndex(x=>x.id===r.doc_id),row={id:r.doc_id,...r.data};i<0?a.push(row):a[i]=row;}
+          if(v.cfg&&dados.cfg)S.cfg={...S.cfg,...dados.cfg,pinHash:S.cfg.pinHash};
+          renderAll();toast("Backup restaurado ✓");return true;
+        }
+        if(!USER)return false;
+        const agora=new Date().toISOString();
+        const tudo=linhas.map(r=>({user_id:USER.id,col:r.col,doc_id:r.doc_id,data:r.data,updated_at:agora}));
+        for(let i=0;i<tudo.length;i+=400){
+          const {error}=await sb.from("bolso_docs").upsert(tudo.slice(i,i+400));
+          if(error){toast("Não restaurou: "+error.message);return false;}
+        }
+        if(v.cfg&&dados.cfg){
+          const ok=await cfgSetFull({...S.cfg,...dados.cfg,pinHash:S.cfg.pinHash});
+          if(!ok)return false;
+        }
+        await loadAll();
+        toast("Backup restaurado ✓ ("+tudo.length+" registros)");
+        return true;
+      }
+    });
+  };
+  inp.click();
+}
+
 function stripId(o){const{id,...rest}=o;return rest}
 async function apagarExemplos(){
   const btn=$("#btn-ex");
@@ -1053,6 +1372,7 @@ function renderAll(){
   else if(S.tab==="rendas")m.innerHTML=vRendas();
   else if(S.tab==="despesas")m.innerHTML=vDespesas();
   else if(S.tab==="relatorio")m.innerHTML=vRelatorio();
+  else if(S.tab==="corridas")m.innerHTML=vCorridas();
   else m.innerHTML=vInv();
   wire(m);
 }
@@ -1087,13 +1407,27 @@ function wire(root){
       if(a==="voltarResumo"){S.tab="resumo";renderAll();}
       if(a==="dlRel")baixarRel();
       if(a==="backup")baixarBackup();
+      if(a==="restaurar")restaurarBackup();
+      if(a==="tetos")editTetos();
+      if(a==="cats")editCategorias();
+      if(a==="addMeta")addMeta();
+      if(a==="editMeta")addMeta(rowOf("metas",id));
+      if(a==="guardarMeta")guardarMeta(rowOf("metas",id));
+      if(a==="pagarHoje"){S.mes=ymNow();renderAll();const x=rowOf("fixas",id);if(x)pagar(x,monthData(S.mes).pagByRef[id]);}
       if(a==="goInv"){S.tab="inv";renderAll();}
       if(a==="goRendas"){S.tab="rendas";renderAll();}
       if(a==="goDespesas"){S.tab="despesas";renderAll();}
+      if(a==="goCorridas"){S.tab="corridas";renderAll();window.scrollTo(0,0);}
+      if(a==="addCorrida")addCorrida();
+      if(a==="editCorrida")addCorrida(rowOf("corridas",id));
+      if(a==="desgaste")editDesgaste();
     });
   });
   const qv=$("#qa-valor");
   if(qv)root.querySelectorAll("#qa-valor,#qa-desc").forEach(el=>el.addEventListener("keydown",e=>{if(e.key==="Enter"){e.preventDefault();quickAdd();}}));
+  const bt=root.querySelector("#bs-txt"), bp=root.querySelector("#bs-per");
+  const atualizaBusca=()=>{S.busca=bt.value;S.buscaPer=bp.value;const box=root.querySelector("#bs-res");if(box)box.innerHTML=resultadoBusca();};
+  if(bt){bt.addEventListener("input",atualizaBusca);bp.addEventListener("change",atualizaBusca);}
   const qf=$("#qa-forma");
   if(qf)qf.addEventListener("change",()=>{const w=$("#qa-parcwrap");if(w)w.hidden=qf.value!=="credito";});
 }
@@ -1133,7 +1467,25 @@ function vResumo(){
   const pendPlan=d.futuras.filter(l=>(l.data||"")<=todayISO());
   const invTot=sum(S.inv.map(i=>i.atual)), invApl=sum(S.inv.map(i=>i.aplicado));
   const nada=!S.fontes.length&&!S.fixas.length&&!S.lanc.length;
-  let h='<div class="tiles">'
+  let h='';
+  const venc=vencimentos(5);
+  if(venc.length){
+    const atras=venc.filter(v=>v.falta<0).length;
+    h+='<div class="card alerta'+(atras?' ruim':'')+'"><div class="cardhead"><h2>'+(atras?'🔴 Contas atrasadas':'⏰ Contas vencendo')+'</h2>'
+      +'<span class="tot">'+venc.length+' conta(s) · <b class="num">'+esc(fmt(sum(venc.map(v=>v.valor))))+'</b></span></div><div class="rows">';
+    for(const v of venc)
+      h+='<div class="row"><div class="main"><div class="t">'+esc(v.nome)+'</div>'
+        +'<div class="d '+(v.falta<0?'neg':v.falta<=1?'warntx':'')+'">'+esc(quandoTxt(v.falta))+' · '+esc(fmt(v.valor))+'</div></div>'
+        +'<button class="btn mini'+(v.falta<0?' danger':'')+'" data-act="'+(v.tipo==="fixa"?"pagarHoje":"pagarFutura")+'" data-id="'+v.id+'">PAGUEI ✓</button></div>';
+    h+='</div></div>';
+  }
+  if(S.mes===ymNow()){
+    const quentes=statusTetos(S.mes).filter(s=>s.p>=0.8);
+    if(quentes.length)
+      h+='<div class="banner">🎯 '+quentes.map(s=>'<span>'+esc(s.cat)+' <b class="num '+s.cls+'">'+Math.round(s.p*100)+'%</b> do teto</span>').join(' · ')
+        +'<button class="act" data-act="goDespesas">VER →</button></div>';
+  }
+  h+='<div class="tiles">'
     +tile("RECEBIDO",fmt(d.rendReal),"previsto "+fmt(d.rendPrev),"pos")
     +tile("GASTO",fmt(d.gasto),"fixas "+fmt(d.fixoReal)+" · avulsas "+fmt(d.avulso),"neg")
     +tile("GUARDADO",fmt(d.guard),"aportes em investimento","")
@@ -1231,10 +1583,11 @@ function chartCategorias(d){
 /* ----- rendas ----- */
 function vRendas(){
   const d=monthData(S.mes);
-  const extras=d.lan.filter(l=>l.tipo==="renda"&&!l.refId);
+  const extras=d.lan.filter(l=>l.tipo==="renda"&&!l.refId&&!l.corridaId);
+  const daCorrida=d.lan.filter(l=>l.tipo==="renda"&&l.corridaId);
   let h='<div class="card"><div class="cardhead"><h2>'+esc(ymLabel(S.mes)).replace(/^./,c=>c.toUpperCase())+'</h2>'
     +'<span class="tot">previsto <b class="num">'+esc(fmt(d.rendPrev))+'</b> · recebido <b class="num pos">'+esc(fmt(d.rendReal))+'</b></span></div>';
-  if(!d.fontes.length&&!extras.length)h+='<div class="empty">Nenhuma renda prevista pra esse mês.<br><b>Cadastra tuas fontes aqui embaixo ↓</b></div>';
+  if(!d.fontes.length&&!extras.length&&!daCorrida.length)h+='<div class="empty">Nenhuma renda prevista pra esse mês.<br><b>Cadastra tuas fontes aqui embaixo ↓</b></div>';
   else{
     h+='<div class="rows">';
     for(const f of d.fontes){
@@ -1248,6 +1601,9 @@ function vRendas(){
     for(const l of extras)
       h+='<div class="row"><div class="main"><div class="t">'+esc(l.desc||"Renda")+chipEx(l)+' <span class="chip">EXTRA</span></div><div class="d">'+esc(dShort(l.data))+'</div></div>'
         +'<button class="pill ok" data-act="editLancRenda" data-id="'+l.id+'"><span class="num">'+esc(fmt(l.valor))+'</span> ✓</button></div>';
+    if(daCorrida.length)
+      h+='<div class="row"><div class="main"><div class="t">🚗 Corridas <span class="chip">'+daCorrida.length+' DIA(S)</span></div><div class="d">Uber, 99… lançadas na aba CORRIDAS</div></div>'
+        +'<button class="pill ok" data-act="goCorridas"><span class="num">'+esc(fmt(sum(daCorrida.map(l=>l.valor))))+'</span> →</button></div>';
     h+='</div>';
   }
   h+='<button class="btn ghost" data-act="rendaExtra">+ RENDA EXTRA NESSE MÊS</button></div>';
@@ -1271,18 +1627,40 @@ function vRendas(){
 /* ----- despesas ----- */
 function vDespesas(){
   const d=monthData(S.mes);
-  const avulsas=d.lan.filter(l=>l.tipo==="avulsa").sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+  const avulsas=d.lan.filter(l=>l.tipo==="avulsa"&&!l.corridaId).sort((a,b)=>(b.data||"").localeCompare(a.data||""));
+  const custoCorr=d.lan.filter(l=>l.tipo==="avulsa"&&l.corridaId);
   let h='<div class="card"><h2>Lançar gasto</h2><p class="sub">o pastel, a gasolina, o mercado — lança na hora que não esquece · no crédito já vai pra fatura certa · data futura vira PLANEJADA (IPVA de janeiro, etc.)</p>'
     +'<div class="qa">'
     +'<div><label class="fl" for="qa-valor">Valor</label><input id="qa-valor" inputmode="decimal" placeholder="0,00"></div>'
     +'<div><label class="fl" for="qa-desc">Descrição</label><input id="qa-desc" placeholder="ex: mercado"></div>'
-    +'<div><label class="fl" for="qa-cat">Categoria</label><select id="qa-cat">'+CAT_DESP.map(c=>'<option'+(c==="Mercado"?" selected":"")+'>'+esc(c)+'</option>').join("")+'</select></div>'
+    +'<div><label class="fl" for="qa-cat">Categoria</label><select id="qa-cat">'+catDesp().map(c=>'<option'+(c==="Mercado"?" selected":"")+'>'+esc(c)+'</option>').join("")+'</select></div>'
     +'<div><label class="fl" for="qa-data">Data</label><input id="qa-data" type="date" value="'+esc(todayISO())+'"></div>'
     +'<div><label class="fl" for="qa-forma">Pagamento</label><select id="qa-forma">'+FORMAS.map(f=>'<option value="'+f[0]+'">'+esc(f[1])+'</option>').join("")+'</select></div>'
     +'<div id="qa-parcwrap" hidden><label class="fl" for="qa-parc">Parcelas</label><input id="qa-parc" inputmode="numeric" value="1"></div>'
     +'<div class="full"><label class="fl" for="qa-obs">Observação (opcional)</label><input id="qa-obs" placeholder="ex: gasto fora do normal, presente, viagem…"></div>'
     +'<button class="btn primary full" data-act="qa">ADICIONAR GASTO</button>'
     +'</div></div>';
+
+  {
+    const st=statusTetos(S.mes);
+    h+='<div class="card"><div class="cardhead"><h2>🎯 Teto por categoria</h2>'
+      +'<span class="tot"><button class="btn mini" data-act="cats">MINHAS CATEGORIAS</button> '
+      +'<button class="btn mini" data-act="tetos">'+(st.length?"✎ TETOS":"DEFINIR TETOS")+'</button></span></div>';
+    if(!st.length)h+='<div class="empty">Define quanto quer gastar no máximo por mês (ex: Mercado R$ 1.200).<br><b>Eu aviso quando chegar em 80% e quando passar.</b></div>';
+    else{
+      h+='<div class="hbars teto">';
+      for(const s of st){
+        const sobra=round2(s.teto-s.gasto);
+        h+='<div class="hb" data-tip="'+esc(s.cat+" · "+fmt(s.gasto)+" de "+fmt(s.teto))+'"><div class="l">'+esc(s.cat)+'</div>'
+          +'<div class="track"><div class="fill '+s.cls+'" style="width:'+Math.max(2,Math.min(100,Math.round(s.p*100)))+'%"></div></div>'
+          +'<div class="v '+s.cls+'">'+Math.round(s.p*100)+'%</div></div>'
+          +'<div class="d tetod">'+esc(fmt(s.gasto))+' de '+esc(fmt(s.teto))+' · '
+          +(sobra>=0?'sobram '+esc(fmt(sobra)):'<span class="neg">passou '+esc(fmt(-sobra))+'</span>')+'</div>';
+      }
+      h+='</div>';
+    }
+    h+='</div>';
+  }
 
   h+='<div class="card"><div class="cardhead"><h2>Fixas do mês</h2><span class="tot">previsto <b class="num">'+esc(fmt(d.fixoPrev))+'</b> · pago <b class="num">'+esc(fmt(d.fixoReal))+'</b></span></div>';
   if(!d.fixas.length)h+='<div class="empty"><b>Nenhuma despesa fixa cadastrada.</b><br>Prestação do carro, seguro, plano de saúde, fatura do cartão…</div>';
@@ -1358,16 +1736,104 @@ function vDespesas(){
   }
 
   h+='<div class="card"><div class="cardhead"><h2>Avulsas de '+esc(MESES[+S.mes.slice(5,7)-1])+'</h2><span class="tot">total <b class="num">'+esc(fmt(d.avulso))+'</b></span></div>';
-  if(!avulsas.length)h+='<div class="empty">Nenhum gasto avulso lançado nesse mês.</div>';
+  if(!avulsas.length&&!custoCorr.length)h+='<div class="empty">Nenhum gasto avulso lançado nesse mês.</div>';
   else{
     h+='<div class="rows">';
+    if(custoCorr.length)
+      h+='<div class="row"><div class="main"><div class="t">🚗 Custos das corridas <span class="chip">Corridas</span></div><div class="d">combustível e outros de '+custoCorr.length+' dia(s) · edita na aba CORRIDAS</div></div>'
+        +'<div class="valcol"><span class="num">'+esc(fmt(sum(custoCorr.map(l=>l.valor))))+'</span> <button class="iconb" data-act="goCorridas" aria-label="Ver corridas">→</button></div></div>';
     for(const l of avulsas)
       h+='<div class="row"><div class="main"><div class="t">'+esc(l.desc||"Gasto")+chipEx(l)+' <span class="chip">'+esc(l.cat||"Outros")+'</span></div><div class="d">'+esc(dShort(l.data))+(l.forma?' · '+esc(formaLabel(l.forma)):'')+(l.obs?' · '+esc(l.obs):'')+'</div></div>'
         +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span> <button class="iconb" data-act="editAvulsa" data-id="'+l.id+'" aria-label="Editar">✎</button></div></div>';
     h+='</div>';
   }
   h+='</div>';
+
+  h+='<div class="card"><div class="cardhead"><h2>🔎 Buscar gastos</h2></div>'
+    +'<p class="sub">ex: "posto", "ifood", "farmácia" — procura no nome, na observação, na categoria e no cartão</p>'
+    +'<div class="qa"><div><label class="fl" for="bs-per">Período</label><select id="bs-per">'
+    +[["ano","Este ano"],["12m","Últimos 12 meses"],["tudo","Tudo"]].map(o=>'<option value="'+o[0]+'"'+(S.buscaPer===o[0]?" selected":"")+'>'+o[1]+'</option>').join("")
+    +'</select></div><div><label class="fl" for="bs-txt">Procurar</label><input id="bs-txt" placeholder="digita pelo menos 2 letras" value="'+esc(S.busca)+'"></div></div>'
+    +'<div id="bs-res">'+resultadoBusca()+'</div></div>';
   return h;
+}
+function resultadoBusca(){
+  const r=buscarLanc(S.busca,S.buscaPer);
+  if(!r)return '';
+  if(!r.itens.length)return '<div class="empty">Nada encontrado com "'+esc(S.busca)+'".</div>';
+  const TIP={avulsa:"avulsa",fixa:"fixa",cartao:"crédito",futura:"planejada"};
+  let h='<div class="banner" style="margin-top:12px">Total gasto: <b class="num">'+esc(fmt(r.total))+'</b> · '+r.itens.length+' lançamento(s)</div><div class="rows">';
+  for(const l of r.itens.slice(0,100))
+    h+='<div class="row"><div class="main"><div class="t">'+esc(l.desc||"Gasto")+' <span class="chip">'+esc(l.cat||"Outros")+'</span> <span class="chip">'+esc(TIP[l.tipo]||l.tipo)+'</span></div>'
+      +'<div class="d">'+esc(l.data?dBR(l.data):ymShort(l.mes))+(l.obs?' · '+esc(l.obs):'')+'</div></div>'
+      +'<div class="valcol"><span class="num">'+esc(fmt(l.valor))+'</span></div></div>';
+  if(r.itens.length>100)h+='<p class="sub" style="margin:8px 0 0">mostrando os 100 mais recentes</p>';
+  return h+'</div>';
+}
+
+/* ----- corridas ----- */
+function vCorridas(){
+  const lista=corridasDoMes(S.mes), r=resumoCorridas(lista);
+  const ant=resumoCorridas(corridasDoMes(addMonths(S.mes,-1)));
+  const mesNome=MESES[+S.mes.slice(5,7)-1];
+  let h='<div class="card"><div class="cardhead"><h2>🚗 Corridas de '+esc(mesNome)+'</h2>'
+    +'<button class="btn mini primary" data-act="addCorrida">+ LANÇAR DIA</button></div>'
+    +'<p class="sub" style="margin:0">Uber, 99, inDrive… lança no fim do dia que eu calculo quanto sobrou de verdade.</p></div>';
+  h+='<div class="tiles">'
+    +tile("APP PAGOU",fmt(r.bruto),r.dias+" dia(s)"+(ant.bruto?" · mês passado "+fmt(ant.bruto):""),"pos")
+    +tile("CUSTOS",fmt(r.custo),r.custoKm!=null?fmt(r.custoKm)+" por km":"combustível + outros","neg")
+    +'<div class="tile destaque"><div class="lbl">LUCRO</div><div class="val num '+(r.lucro<0?"neg":"pos")+'">'+esc(fmt(r.lucro))+'</div><div class="sm">'+(r.porHora!=null?esc(fmt(r.porHora))+" por hora":"lança as horas pra ver o R$/hora")+'</div></div>'
+    +tile("RODOU",(r.km?String(Math.round(r.km)).replace(/\B(?=(\d{3})+(?!\d))/g,".")+" km":"—"),(r.horas?String(r.horas).replace(".",",")+" h":"")+(r.porKm!=null?" · "+fmt(r.porKm)+"/km":""),"")
+    +'</div>';
+  h+='<div class="banner">'+(r.desg>0
+      ?'Lucro real, descontando desgaste de <b class="num">'+esc(fmt(r.desg))+'</b>/km: <b class="num '+(r.real<0?"neg":"pos")+'">'+esc(fmt(r.real))+'</b>'+(r.realHora!=null?' · <b class="num">'+esc(fmt(r.realHora))+'</b>/hora':'')
+      :'Quer ver o lucro <b>real</b>, descontando pneu, óleo e revisão?')
+    +'<button class="act" data-act="desgaste">'+(r.desg>0?"AJUSTAR":"DEFINIR")+' ✎</button></div>';
+
+  const top=melhoresDias();
+  if(top.length>=2)
+    h+='<div class="card"><h2>Melhores dias pra rodar</h2><p class="sub">lucro por hora, somando todos os dias que tu lançou</p><div class="hbars">'
+      +top.map((t,i)=>'<div class="hb" data-tip="'+esc(t.dia+" · "+fmt(t.porHora)+"/hora · "+t.n+" dia(s)")+'"><div class="l">'+(i===0?"🏆 ":"")+esc(t.dia)+'</div>'
+        +'<div class="track"><div class="fill" style="width:'+Math.max(2,Math.round(t.porHora/Math.max(top[0].porHora,1)*100))+'%"></div></div>'
+        +'<div class="v">'+esc(fmt(t.porHora))+'/h</div></div>').join('')
+      +'</div></div>';
+
+  h+='<div class="card"><div class="cardhead"><h2>Dias lançados</h2><span class="tot">'+lista.length+' dia(s)</span></div>';
+  if(!lista.length)h+='<div class="empty">Nenhum dia de corrida em '+esc(mesNome)+'.<br><b>Rodou hoje? Clica em + LANÇAR DIA.</b></div>';
+  else{
+    h+='<div class="rows">';
+    for(const c of lista){
+      const l=corridaLucro(c);
+      h+='<div class="row"><div class="main"><div class="t">'+esc(DIAS_SEM[new Date(c.data+"T12:00:00").getDay()]).replace(/^./,x=>x.toUpperCase())+', '+esc(dShort(c.data))+' <span class="chip">'+esc(c.app||"")+'</span></div>'
+        +'<div class="d">app '+esc(fmt(c.bruto))+(corridaCusto(c)>0?' − custos '+esc(fmt(corridaCusto(c))):'')
+        +(c.horas?' · '+esc(String(c.horas).replace(".",","))+'h':'')+(c.km?' · '+esc(String(c.km).replace(".",","))+' km':'')
+        +(c.corridas?' · '+esc(String(c.corridas))+' corridas':'')+(c.horas>0?' · <b>'+esc(fmt(l/c.horas))+'/h</b>':'')
+        +(c.obs?' · '+esc(c.obs):'')+'</div></div>'
+        +'<div class="valcol"><span class="num '+(l<0?"neg":"pos")+'">'+esc(fmt(l))+'</span> <button class="iconb" data-act="editCorrida" data-id="'+c.id+'" aria-label="Editar">✎</button></div></div>';
+    }
+    h+='</div>';
+  }
+  return h+'</div>';
+}
+
+/* ----- metas ----- */
+function vMetas(){
+  let h='<div class="card"><div class="cardhead"><h2>🎯 Metas</h2><button class="btn mini" data-act="addMeta">+ NOVA META</button></div>';
+  if(!S.metas.length)return h+'<div class="empty">Juntando pra alguma coisa? Viagem, reserva, carro…<br><b>Cria uma meta que eu calculo quanto guardar por mês.</b></div></div>';
+  h+='<div class="rows">';
+  for(const m of S.metas.slice().sort((a,b)=>(a.prazo||"9999").localeCompare(b.prazo||"9999"))){
+    const i=metaInfo(m), batida=i.falta<=0;
+    let sub;
+    if(batida)sub='<span class="pos">🎉 meta batida!</span>';
+    else if(i.meses!=null&&i.meses<=0)sub='<span class="neg">prazo passou · faltam '+esc(fmt(i.falta))+'</span>';
+    else sub='faltam '+esc(fmt(i.falta))+(i.porMes?' · guarda <b class="num">'+esc(fmt(i.porMes))+'</b>/mês até '+esc(ymShort(m.prazo)):'');
+    h+='<div class="row"><div class="main"><div class="t">'+esc(m.nome)+'</div>'
+      +'<div class="track meta"><div class="fill'+(batida?' pos':'')+'" style="width:'+Math.max(2,Math.round(i.p*100))+'%"></div></div>'
+      +'<div class="d"><b class="num">'+esc(fmt(i.tem))+'</b> de '+esc(fmt(i.alvo))+' ('+Math.round(i.p*100)+'%) · '+sub+'</div></div>'
+      +'<div class="valcol">'+(batida?'':'<button class="btn mini primary" data-act="guardarMeta" data-id="'+m.id+'">+ GUARDAR</button>')
+      +' <button class="iconb" data-act="editMeta" data-id="'+m.id+'" aria-label="Editar">✎</button></div></div>';
+  }
+  return h+'</div></div>';
 }
 
 /* ----- investimentos ----- */
@@ -1378,6 +1844,7 @@ function vInv(){
     +tile("APLICADO",fmt(apl),"dinheiro que você colocou","")
     +'<div class="tile"><div class="lbl">RENDIMENTO</div><div class="val num '+(rend<0?"neg":"pos")+'">'+esc((rend>=0?"+":"−")+" "+fmt(Math.abs(rend)))+'</div><div class="sm">'+(apl>0?esc(pct(rend/apl))+" sobre o aplicado":"—")+'</div></div>'
     +'</div>';
+  h+=vMetas();
   h+='<div class="banner">CDI de referência: <b class="num">'+(S.cfg.cdi?esc(String(S.cfg.cdi).replace(".",","))+"% a.a.":"não definido")+'</b>'
     +'<button class="act" data-act="cdi">'+(S.cfg.cdi?"ATUALIZAR":"DEFINIR")+' ✎</button></div>';
   if(!S.inv.length){
@@ -1426,6 +1893,7 @@ function vRelatorio(){
     +'<span style="flex:1"></span>'
     +'<button class="btn mini" data-act="voltarResumo">← VOLTAR</button>'
     +'<button class="btn mini" data-act="backup" title="Baixa todos os teus dados num arquivo">BACKUP</button>'
+    +'<button class="btn mini" data-act="restaurar" title="Puxa os dados de volta de um arquivo de backup">RESTAURAR</button>'
     +'<button class="btn mini primary" data-act="dlRel">BAIXAR</button></div>'
     +'<p class="sub" style="margin:6px 0 0">Gerado em '+esc(dBR(todayISO()))+' · navega nos meses ali em cima pra ver outros relatórios</p></div>';
   h+='<div class="tiles">'
@@ -1610,7 +2078,7 @@ window.addEventListener("offline",()=>toast("Sem internet — o que tu lançar a
 window.addEventListener("online",()=>{toast("Internet voltou ✓");if(sb&&USER&&!S.mem)loadAll();});
 
 function start(hot){
-  if(hot&&typeof hot.tab==="string"&&["resumo","rendas","despesas","inv","relatorio"].includes(hot.tab))S.tab=hot.tab;
+  if(hot&&typeof hot.tab==="string"&&["resumo","rendas","despesas","corridas","inv","relatorio"].includes(hot.tab))S.tab=hot.tab;
   if(hot&&validYM(hot.mes))S.mes=hot.mes;
   if(location.hash==="#gasto")S.tab="despesas";
   if(lsGet("bolso-haspin")==="1"&&ssGet("bolso-unlock")!=="1")showLock();
